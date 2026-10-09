@@ -30,7 +30,7 @@ class AudioRecorder {
 
         // Native Web Speech Recognition for continuous transcription
         this.recognition = null;
-        this.accumulatedTranscript = "";
+        this.turnStartIndex = 0;
         this.currentLiveTranscript = "";
         this.hasNativeSpeechRecognition = ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
         this.initSpeechRecognition();
@@ -45,6 +45,10 @@ class AudioRecorder {
         if (!this.hasNativeSpeechRecognition) return;
         const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
         try {
+            if (this.recognition) {
+                try { this.recognition.abort(); } catch (e) {}
+            }
+
             this.recognition = new SpeechRec();
             this.recognition.continuous = true;
             this.recognition.interimResults = true;
@@ -55,7 +59,9 @@ class AudioRecorder {
                 let fullFinal = '';
                 let interim = '';
 
-                for (let i = 0; i < event.results.length; ++i) {
+                // Only read results for the CURRENT turn (ignore previous turns)
+                const startIndex = Math.max(0, this.turnStartIndex || 0);
+                for (let i = startIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
                         fullFinal += event.results[i][0].transcript + ' ';
                     } else {
@@ -77,9 +83,10 @@ class AudioRecorder {
             };
 
             this.recognition.onend = () => {
-                // Auto-restart if live call is still active and not muted
+                // Auto-restart with clean turn index if live call is still active and unmuted
                 if (this.isLiveCall && this.isRecording && !this.isMuted) {
                     try {
+                        this.turnStartIndex = 0;
                         this.recognition.start();
                     } catch (e) {}
                 }
@@ -207,11 +214,25 @@ class AudioRecorder {
 
     setMuted(muted) {
         this.isMuted = muted;
+        this.hasSpokenInTurn = false;
+        this.silenceStartTime = null;
+        this.currentLiveTranscript = "";
+        this.audioData = [];
+
         if (muted) {
-            this.hasSpokenInTurn = false;
-            this.silenceStartTime = null;
-            this.currentLiveTranscript = "";
-            this.audioData = [];
+            // Stop recognition completely while AI is speaking so it doesn't hear itself
+            if (this.recognition) {
+                try { this.recognition.abort(); } catch (e) {}
+            }
+        } else {
+            // Clean state for fresh turn: re-initialize recognition with zero previous history
+            if (this.isLiveCall && this.isRecording) {
+                this.turnStartIndex = 0;
+                this.initSpeechRecognition();
+                try {
+                    this.recognition.start();
+                } catch (e) {}
+            }
         }
     }
 
