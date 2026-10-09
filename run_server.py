@@ -23,7 +23,7 @@ if __name__ == "__main__":
     free_port(port)
     
     print(f"\n=======================================================")
-    print(f"🚀 Voice AI Agent Live on: http://localhost:{port}")
+    print(f">> Voice AI Agent Live on: http://localhost:{port}")
     print(f"=======================================================\n")
     uvicorn.run("app:app", host=host, port=port, log_level="info")
 
