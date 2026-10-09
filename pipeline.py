@@ -79,69 +79,74 @@ class SpeechToTextService:
 
 
 class LocalOllamaLLMService:
-    """Local LLM Service using local Ollama instance (Qwen 2.5)."""
+    """Local LLM Service using local Ollama instance (Qwen 2.5) optimized for CPU."""
 
     DEFAULT_SYSTEM_PROMPT = (
-        "You are a friendly, concise, and helpful voice AI assistant. "
-        "You are participating in a real-time voice conversation. "
-        "Keep your answers conversational, natural, and very concise (1-2 sentences). "
-        "Avoid using markdown, lists, bullet points, asterisks, code blocks, or emojis. "
-        "Speak directly and warmly as if talking on the phone."
+        "You are a lightning-fast voice AI. "
+        "Answer in 1 punchy, concise sentence (under 12 words). "
+        "No markdown, no bullet points, no preamble."
     )
 
-    OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
+    OLLAMA_API_URL = "http://127.0.0.1:11434/api/chat"
 
-    def __init__(self, model: str = "qwen2.5:1.5b", base_url: str = "http://127.0.0.1:11434/v1"):
+    def __init__(self, model: str = "qwen2.5:1.5b", base_url: str = "http://127.0.0.1:11434/api/chat"):
         self.model = model
         self.base_url = base_url
 
     def generate_response(self, prompt: str, conversation_history: Optional[List[Dict[str, str]]] = None, system_prompt: Optional[str] = None) -> str:
         """
-        Generates conversational response using local Ollama.
+        Generates fast conversational response using direct Ollama API with multi-threading.
         """
         try:
-            client = OpenAI(base_url=self.base_url, api_key="ollama")
             sys_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
-            
             messages = [{"role": "system", "content": sys_prompt}]
             
             if conversation_history:
-                for msg in conversation_history[-4:]:
+                for msg in conversation_history[-2:]:
                     if msg.get("role") in ("user", "assistant") and msg.get("content"):
                         messages.append({"role": msg["role"], "content": msg["content"]})
             
             messages.append({"role": "user", "content": prompt})
 
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=90,
-                temperature=0.6,
-            )
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "stream": False,
+                "options": {
+                    "num_thread": 8,
+                    "num_predict": 20,
+                    "num_ctx": 256,
+                    "temperature": 0.3,
+                    "top_k": 20
+                }
+            }
 
-            answer = response.choices[0].message.content
-            return answer.strip() if answer else "I'm listening."
+            resp = requests.post("http://127.0.0.1:11434/api/chat", json=payload, timeout=6)
+            if resp.status_code == 200:
+                data = resp.json()
+                answer = data.get("message", {}).get("content", "").strip()
+                return answer if answer else "I'm listening."
+            else:
+                raise Exception(f"Ollama returned HTTP {resp.status_code}: {resp.text}")
 
         except Exception as e:
             raise VoicePipelineError("LLM", f"Local Ollama generation failed: {str(e)}. Ensure Ollama is running.", e)
 
 
 class GroqLLMService:
-    """Cloud LLM Service using Groq API for ultra-low latency."""
+    """Cloud LLM Service using Groq API for ultra-low latency (<200ms)."""
 
     DEFAULT_SYSTEM_PROMPT = (
-        "You are a friendly, concise, and helpful voice AI assistant. "
-        "You are participating in a real-time voice conversation. "
-        "Keep your answers conversational, natural, and concise (1-2 sentences). "
-        "Avoid using markdown, lists, bullet points, asterisks, code blocks, or emojis. "
-        "Speak directly and warmly as if talking on the phone."
+        "You are a lightning-fast voice AI. "
+        "Answer in 1 concise, clear sentence (under 15 words). "
+        "Never use markdown, bullet points, or lists."
     )
 
     GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
-        self.model = model or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.model = model or os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
     def _get_client(self) -> OpenAI:
         key = self.api_key or os.getenv("GROQ_API_KEY", "")
@@ -159,7 +164,7 @@ class GroqLLMService:
             messages = [{"role": "system", "content": sys_prompt}]
             
             if conversation_history:
-                for msg in conversation_history[-4:]:
+                for msg in conversation_history[-2:]:
                     if msg.get("role") in ("user", "assistant") and msg.get("content"):
                         messages.append({"role": msg["role"], "content": msg["content"]})
             
@@ -168,8 +173,8 @@ class GroqLLMService:
             response = client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=90,
-                temperature=0.6,
+                max_tokens=60,
+                temperature=0.5,
             )
 
             answer = response.choices[0].message.content
@@ -182,22 +187,19 @@ class GroqLLMService:
 
 
 class LocalNeuralTTSService:
-    """Local Free Neural TTS Service using edge-tts with Windows SAPI fallback (Zero API Keys required)."""
+    """Local Free Neural TTS Service using edge-tts with Windows SAPI fallback."""
 
     def __init__(self, voice: str = "en-US-JennyNeural"):
         self.voice = voice
 
     def synthesize(self, text: str, voice: Optional[str] = None) -> bytes:
-        """
-        Synthesizes text into MP3 audio bytes using Edge TTS neural voices or offline SAPI.
-        """
         v = voice or self.voice
         
         # Method 1: Edge TTS Neural Voice
         if HAS_EDGE_TTS and edge_tts is not None:
             try:
                 async def _stream_edge():
-                    communicate = edge_tts.Communicate(text, v)
+                    communicate = edge_tts.Communicate(text, v, rate="+15%") # 15% faster speech for lower turnaround
                     out_bytes = b""
                     async for chunk in communicate.stream():
                         if chunk.get("type") == "audio":
@@ -205,7 +207,6 @@ class LocalNeuralTTSService:
                     return out_bytes
 
                 try:
-                    # If already in an active event loop
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         import concurrent.futures
@@ -228,6 +229,7 @@ class LocalNeuralTTSService:
             ps_script = (
                 f"Add-Type -AssemblyName System.Speech; "
                 f"$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                f"$synth.Rate = 2; "
                 f"$synth.SetOutputToWaveFile('{temp_wav}'); "
                 f"$synth.Speak('{safe_text}'); "
                 f"$synth.Dispose()"
@@ -249,7 +251,7 @@ class LocalNeuralTTSService:
 
 
 class ElevenLabsTTSService:
-    """TTS Service using ElevenLabs REST API."""
+    """TTS Service using ElevenLabs Turbo REST API (<400ms)."""
 
     def __init__(self, api_key: Optional[str] = None, voice_id: Optional[str] = None):
         self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY", "")
@@ -272,18 +274,19 @@ class ElevenLabsTTSService:
             "xi-api-key": key
         }
 
+        # eleven_turbo_v2_5 is ElevenLabs' lowest-latency model
         payload = {
             "text": text,
-            "model_id": "eleven_multilingual_v2",
+            "model_id": "eleven_turbo_v2_5",
             "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.75,
-                "use_speaker_boost": True
+                "stability": 0.45,
+                "similarity_boost": 0.7,
+                "use_speaker_boost": False
             }
         }
 
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=25)
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
             if response.status_code != 200:
                 try:
                     err_json = response.json()
