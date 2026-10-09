@@ -21,18 +21,24 @@ class AudioRecorder {
         this.onSilenceDetected = null;  // WAV fallback
 
         // High-Speed VAD Parameters
-        this.speechThreshold = 0.022;
-        this.silenceDurationMs = 450; // Ultra-fast: 450ms of silence triggers instant response
+        this.speechThreshold = 0.020;
+        this.silenceDurationMs = 1600; // Commercial Voice standard: 1.6s pause required before triggering AI response
         this.hasSpokenInTurn = false;
         this.silenceStartTime = null;
         this.speechStartTime = null;
         this.isMuted = false;
 
-        // Native Web Speech Recognition for zero-delay instant transcription
+        // Native Web Speech Recognition for continuous transcription
         this.recognition = null;
+        this.accumulatedTranscript = "";
         this.currentLiveTranscript = "";
         this.hasNativeSpeechRecognition = ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
         this.initSpeechRecognition();
+    }
+
+    setSilenceDuration(ms) {
+        this.silenceDurationMs = Math.max(800, Math.min(4000, ms));
+        console.log(`VAD Silence threshold updated to: ${this.silenceDurationMs}ms`);
     }
 
     initSpeechRecognition() {
@@ -46,31 +52,42 @@ class AudioRecorder {
 
             this.recognition.onresult = (event) => {
                 if (this.isMuted) return;
+                let fullFinal = '';
                 let interim = '';
-                let final = '';
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
+
+                for (let i = 0; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
-                        final += event.results[i][0].transcript;
+                        fullFinal += event.results[i][0].transcript + ' ';
                     } else {
                         interim += event.results[i][0].transcript;
                     }
                 }
-                const text = (final || interim).trim();
-                if (text) {
-                    this.currentLiveTranscript = text;
+
+                const currentText = (fullFinal + interim).trim();
+                if (currentText) {
+                    this.currentLiveTranscript = currentText;
                     if (!this.hasSpokenInTurn) {
                         this.hasSpokenInTurn = true;
                         this.speechStartTime = Date.now();
                         if (this.onSpeechStart) this.onSpeechStart();
                     }
+                    // Reset silence timer on any detected speech or filler
                     this.silenceStartTime = null;
                 }
             };
 
+            this.recognition.onend = () => {
+                // Auto-restart if live call is still active and not muted
+                if (this.isLiveCall && this.isRecording && !this.isMuted) {
+                    try {
+                        this.recognition.start();
+                    } catch (e) {}
+                }
+            };
+
             this.recognition.onerror = (e) => {
-                // Non-fatal, audio buffer fallback will still work
                 if (e.error !== 'no-speech') {
-                    console.debug('Speech recognition notification:', e.error);
+                    console.debug('Speech recognition status:', e.error);
                 }
             };
         } catch (e) {

@@ -82,9 +82,10 @@ class LocalOllamaLLMService:
     """Local LLM Service using local Ollama instance (Qwen 2.5) optimized for CPU."""
 
     DEFAULT_SYSTEM_PROMPT = (
-        "You are a lightning-fast voice AI. "
-        "Answer in 1 punchy, concise sentence (under 12 words). "
-        "No markdown, no bullet points, no preamble."
+        "You are a friendly, helpful voice assistant for customer care. "
+        "Answer clearly and conversationally in 1 or 2 natural spoken sentences. "
+        "Ignore filler words like 'hmm', 'uh', 'like' and address the user's core intent. "
+        "Do not use markdown, bullet points, asterisks, or robotic phrasing."
     )
 
     OLLAMA_API_URL = "http://127.0.0.1:11434/api/chat"
@@ -114,18 +115,18 @@ class LocalOllamaLLMService:
                 "stream": False,
                 "options": {
                     "num_thread": 8,
-                    "num_predict": 20,
+                    "num_predict": 35,
                     "num_ctx": 256,
-                    "temperature": 0.3,
+                    "temperature": 0.4,
                     "top_k": 20
                 }
             }
 
-            resp = requests.post("http://127.0.0.1:11434/api/chat", json=payload, timeout=6)
+            resp = requests.post("http://127.0.0.1:11434/api/chat", json=payload, timeout=8)
             if resp.status_code == 200:
                 data = resp.json()
                 answer = data.get("message", {}).get("content", "").strip()
-                return answer if answer else "I'm listening."
+                return answer if answer else "I'm listening, how can I help you today?"
             else:
                 raise Exception(f"Ollama returned HTTP {resp.status_code}: {resp.text}")
 
@@ -137,9 +138,10 @@ class GroqLLMService:
     """Cloud LLM Service using Groq API for ultra-low latency (<200ms)."""
 
     DEFAULT_SYSTEM_PROMPT = (
-        "You are a lightning-fast voice AI. "
-        "Answer in 1 concise, clear sentence (under 15 words). "
-        "Never use markdown, bullet points, or lists."
+        "You are a friendly, fast, and helpful voice AI customer care assistant. "
+        "Answer clearly and warmly in 1 or 2 natural spoken sentences. "
+        "Ignore conversational filler words like 'hmm', 'uh', 'like' and focus on the user's real question. "
+        "Never use markdown, lists, or asterisks."
     )
 
     GROQ_BASE_URL = "https://api.groq.com/openai/v1"

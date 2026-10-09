@@ -214,6 +214,18 @@
                     </div>
                 </div>
 
+                <!-- Global VAD & Turn-Taking Settings -->
+                <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                    <label for="selectSilenceDuration">Turn-Taking Pause Delay (Silence Threshold)</label>
+                    <select id="selectSilenceDuration">
+                        <option value="1200">1.2 Seconds (Fast turnaround)</option>
+                        <option value="1600" selected>1.6 Seconds (Standard Commercial Voice - Recommended)</option>
+                        <option value="2000">2.0 Seconds (Long Sentences & Thinking Pauses)</option>
+                        <option value="2500">2.5 Seconds (Extended Thinking Time)</option>
+                    </select>
+                    <span class="form-hint">How long you can pause or say filler words ("hmm", "like") before AI assumes you're finished.</span>
+                </div>
+
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" id="btnCancelModal">Cancel</button>
                     <button type="submit" class="btn-primary">Apply Settings</button>

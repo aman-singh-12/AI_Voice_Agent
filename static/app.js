@@ -55,6 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const inputGroqKey = document.getElementById('inputGroqKey');
     const inputElevenKey = document.getElementById('inputElevenKey');
     const selectElevenVoice = document.getElementById('selectElevenVoice');
+    const selectSilenceDuration = document.getElementById('selectSilenceDuration');
 
     // Toast
     const toastContainer = document.getElementById('toastContainer');
@@ -115,6 +116,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Silence duration listener
+    if (selectSilenceDuration) {
+        const savedSilence = localStorage.getItem('voice_silence_ms');
+        if (savedSilence) {
+            selectSilenceDuration.value = savedSilence;
+            recorder.setSilenceDuration(parseInt(savedSilence));
+        } else {
+            recorder.setSilenceDuration(parseInt(selectSilenceDuration.value || '1600'));
+        }
+
+        selectSilenceDuration.addEventListener('change', (e) => {
+            const ms = parseInt(e.target.value);
+            recorder.setSilenceDuration(ms);
+            localStorage.setItem('voice_silence_ms', ms);
+            showToast(`Pause delay set to ${(ms/1000).toFixed(1)}s`, 'info');
+        });
+    }
+
     // ----------------------------------------------------
     // Recorder VAD & Visualizer Callbacks
     // ----------------------------------------------------
@@ -127,8 +146,8 @@ document.addEventListener('DOMContentLoaded', () => {
     recorder.onSpeechStart = () => {
         if (isLiveCallActive && !isProcessing && !isSpeaking) {
             voiceOrb.className = 'voice-orb recording';
-            statusHeading.innerText = '🎙️ Listening to you...';
-            statusSubtext.innerText = 'Speak naturally. Instant turnaround as soon as you stop speaking.';
+            statusHeading.innerText = '🎙️ Listening to your question...';
+            statusSubtext.innerText = 'Take your time. You can pause or use filler words while thinking.';
         }
     };
 
@@ -204,8 +223,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 isSpeaking = false;
                 if (isLiveCallActive) {
                     voiceOrb.classList.add('speaking');
+                    const silenceSec = ((recorder.silenceDurationMs || 1600) / 1000).toFixed(1);
                     statusHeading.innerText = '🟢 In Call (Listening...)';
-                    statusSubtext.innerText = 'Speak anytime. AI answers 1s after you stop speaking.';
+                    statusSubtext.innerText = `Speak anytime. AI answers after a full ${silenceSec}s pause.`;
                     recorder.setMuted(false);
                 } else {
                     statusHeading.innerText = 'Hands-Free Live Call Ready';
