@@ -355,20 +355,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function stopManualRecording() {
         if (!recorder.isRecording) return;
-        const liveText = (recorder.currentLiveTranscript || '').trim();
         setState('STT');
         try {
             const wavBlob = await recorder.stop();
-            if (liveText) {
-                // 0ms instant STT path!
-                await processText(liveText);
-            } else if (wavBlob && wavBlob.size >= 500) {
-                // Whisper Turbo / backend STT fallback
-                await processAudio(wavBlob);
-            } else {
-                showToast('No speech detected.', 'info');
+            if (!wavBlob || wavBlob.size < 500) {
+                showToast('Recording was too short.', 'error');
                 setState('IDLE');
+                return;
             }
+            await processAudio(wavBlob);
         } catch (err) {
             showToast('Recording failed: ' + err.message, 'error');
             setState('ERROR', err.message);
