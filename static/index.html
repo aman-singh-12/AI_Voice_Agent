@@ -165,6 +165,7 @@
                     <select id="selectPipelineMode">
                         <option value="local">💻 100% Local (Ollama + Qwen 2.5 + Free Neural TTS - No Keys Needed)</option>
                         <option value="cloud">☁️ Cloud Mode (Groq LPU + ElevenLabs API)</option>
+                        <option value="openai">✨ OpenAI Responses API + Existing TTS</option>
                     </select>
                 </div>
 
@@ -197,6 +198,18 @@
                         <label for="inputGroqKey">Groq API Key</label>
                         <input type="password" id="inputGroqKey" placeholder="gsk_...">
                         <span class="form-hint">For cloud LPU inference.</span>
+                    </div>
+
+                    <div id="openaiSettingsSection" style="display: none;">
+                        <div class="form-group">
+                            <label for="inputOpenAIModel">OpenAI Model</label>
+                            <input type="text" id="inputOpenAIModel" placeholder="Configured in backend .env">
+                            <span class="form-hint">The backend verifies access before sending a request. The API key is never sent to the browser.</span>
+                        </div>
+                        <div class="form-group">
+                            <label>OpenAI API Key</label>
+                            <span class="form-hint">Configure OPENAI_API_KEY in the backend environment; it is intentionally not accepted here.</span>
+                        </div>
                     </div>
 
                     <div class="form-group">

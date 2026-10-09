@@ -180,6 +180,84 @@ class GroqLLMService:
             raise VoicePipelineError("LLM", f"Groq LLM generation failed: {str(e)}", e)
 
 
+class OpenAILLMService:
+    """OpenAI Responses API client with server-side model and key configuration."""
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+        self.model = model or os.getenv("OPENAI_MODEL", "")
+        self._verified_model: Optional[str] = None
+
+    def _get_client(self) -> OpenAI:
+        key = self.api_key or os.getenv("OPENAI_API_KEY", "")
+        if not key:
+            raise VoicePipelineError(
+                "LLM",
+                "OpenAI API key is missing. Configure OPENAI_API_KEY in the backend environment."
+            )
+        return OpenAI(api_key=key)
+
+    def verify_model_access(self) -> None:
+        """Verify both the configured model and this key's access to it."""
+        if not self.model:
+            raise VoicePipelineError(
+                "LLM",
+                "OpenAI model is not configured. Set OPENAI_MODEL to a model available to your API key."
+            )
+        if self._verified_model == self.model:
+            return
+        try:
+            self._get_client().models.retrieve(self.model)
+            self._verified_model = self.model
+        except Exception as e:
+            raise VoicePipelineError(
+                "LLM",
+                f"OpenAI model '{self.model}' is unavailable to this API key: {str(e)}",
+                e
+            )
+
+    def generate_response(
+        self,
+        prompt: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        system_prompt: Optional[str] = None
+    ) -> str:
+        self.verify_model_access()
+        messages: List[Dict[str, str]] = []
+        for message in conversation_history or []:
+            role = message.get("role")
+            content = message.get("content")
+            if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": prompt})
+
+        try:
+            stream = self._get_client().responses.create(
+                model=self.model,
+                instructions=system_prompt or (
+                    "You are a friendly, articulate voice AI assistant. "
+                    "Give direct, helpful answers in 2 to 3 natural spoken sentences. "
+                    "Do not use markdown, bullets, or lists."
+                ),
+                input=messages,
+                stream=True,
+            )
+            chunks: List[str] = []
+            for event in stream:
+                if getattr(event, "type", "") == "response.output_text.delta":
+                    delta = getattr(event, "delta", "")
+                    if delta:
+                        chunks.append(delta)
+            answer = "".join(chunks).strip()
+            if not answer:
+                raise VoicePipelineError("LLM", "OpenAI returned an empty response.")
+            return answer
+        except VoicePipelineError:
+            raise
+        except Exception as e:
+            raise VoicePipelineError("LLM", f"OpenAI Responses API failed: {str(e)}", e)
+
+
 class LocalNeuralTTSService:
     """Local Free Neural TTS Service using edge-tts with Windows SAPI fallback."""
 
@@ -306,6 +384,7 @@ class VoicePipeline:
         self.stt = SpeechToTextService()
         self.local_llm = LocalOllamaLLMService()
         self.cloud_llm = GroqLLMService()
+        self.openai_llm = OpenAILLMService()
         self.local_tts = LocalNeuralTTSService()
         self.cloud_tts = ElevenLabsTTSService()
         self.mode = os.getenv("PIPELINE_MODE", "local")
@@ -331,6 +410,9 @@ class VoicePipeline:
             self.cloud_llm.api_key = keys["groq_api_key"]
         if keys.get("groq_model"):
             self.cloud_llm.model = keys["groq_model"]
+        if keys.get("openai_model"):
+            self.openai_llm.model = keys["openai_model"]
+            self.openai_llm._verified_model = None
         if keys.get("elevenlabs_api_key"):
             self.cloud_tts.api_key = keys["elevenlabs_api_key"]
         if keys.get("elevenlabs_voice_id"):
@@ -345,6 +427,11 @@ class VoicePipeline:
         llm_start = time.time()
         if active_mode == "local":
             assistant_text = self.local_llm.generate_response(
+                prompt=user_text,
+                conversation_history=conversation_history
+            )
+        elif active_mode == "openai":
+            assistant_text = self.openai_llm.generate_response(
                 prompt=user_text,
                 conversation_history=conversation_history
             )
@@ -407,6 +494,11 @@ class VoicePipeline:
         llm_start = time.time()
         if active_mode == "local":
             assistant_text = self.local_llm.generate_response(
+                prompt=user_text,
+                conversation_history=conversation_history
+            )
+        elif active_mode == "openai":
+            assistant_text = self.openai_llm.generate_response(
                 prompt=user_text,
                 conversation_history=conversation_history
             )

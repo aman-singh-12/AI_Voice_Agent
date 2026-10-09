@@ -45,6 +45,7 @@ class SaveKeysRequest(BaseModel):
     local_voice: Optional[str] = "en-US-JennyNeural"
     groq_api_key: Optional[str] = ""
     groq_model: Optional[str] = ""
+    openai_model: Optional[str] = ""
     elevenlabs_api_key: Optional[str] = ""
     elevenlabs_voice_id: Optional[str] = ""
 
@@ -62,6 +63,7 @@ async def get_status():
     """Checks presence of local Ollama, models, and cloud API keys."""
     groq_key = os.getenv("GROQ_API_KEY", "")
     eleven_key = os.getenv("ELEVENLABS_API_KEY", "")
+    openai_key = os.getenv("OPENAI_API_KEY", "")
 
     # Check local Ollama health
     ollama_running = False
@@ -74,6 +76,15 @@ async def get_status():
             installed_models = [m["name"] for m in data.get("models", [])]
     except Exception:
         ollama_running = False
+
+    openai_model_accessible = False
+    openai_model_error = ""
+    if openai_key and os.getenv("OPENAI_MODEL", ""):
+        try:
+            pipeline.openai_llm.verify_model_access()
+            openai_model_accessible = True
+        except VoicePipelineError as e:
+            openai_model_error = e.message
 
     return {
         "status": "ready",
@@ -93,6 +104,12 @@ async def get_status():
             "groq_model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
             "elevenlabs_configured": bool(eleven_key and eleven_key != "your_elevenlabs_api_key_here"),
             "elevenlabs_voice": os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+        },
+        "openai": {
+            "configured": bool(openai_key),
+            "model": os.getenv("OPENAI_MODEL", ""),
+            "model_accessible": openai_model_accessible,
+            "model_error": openai_model_error
         }
     }
 
@@ -135,6 +152,9 @@ async def save_keys(req: SaveKeysRequest):
     if req.groq_model:
         os.environ["GROQ_MODEL"] = req.groq_model
         set_key(env_file, "GROQ_MODEL", req.groq_model)
+    if req.openai_model:
+        os.environ["OPENAI_MODEL"] = req.openai_model
+        set_key(env_file, "OPENAI_MODEL", req.openai_model)
     if req.elevenlabs_api_key:
         os.environ["ELEVENLABS_API_KEY"] = req.elevenlabs_api_key
         set_key(env_file, "ELEVENLABS_API_KEY", req.elevenlabs_api_key)

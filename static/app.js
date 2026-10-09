@@ -49,11 +49,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectPipelineMode = document.getElementById('selectPipelineMode');
     const localSettingsSection = document.getElementById('localSettingsSection');
     const cloudSettingsSection = document.getElementById('cloudSettingsSection');
+    const openaiSettingsSection = document.getElementById('openaiSettingsSection');
 
     const selectOllamaModel = document.getElementById('selectOllamaModel');
     const selectLocalVoice = document.getElementById('selectLocalVoice');
     const inputGroqKey = document.getElementById('inputGroqKey');
     const inputElevenKey = document.getElementById('inputElevenKey');
+    const inputOpenAIModel = document.getElementById('inputOpenAIModel');
     const selectElevenVoice = document.getElementById('selectElevenVoice');
     const selectSilenceDuration = document.getElementById('selectSilenceDuration');
 
@@ -92,6 +94,20 @@ document.addEventListener('DOMContentLoaded', () => {
             if (selectPipelineMode) selectPipelineMode.value = 'local';
             if (localSettingsSection) localSettingsSection.style.display = 'block';
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
+            if (openaiSettingsSection) openaiSettingsSection.style.display = 'none';
+        } else if (mode === 'openai') {
+            btnModeCloud.classList.remove('active');
+            btnModeLocal.classList.remove('active');
+            badgePipeline.innerText = 'OpenAI Responses API';
+            textLLM.innerText = 'OpenAI Responses API';
+            textTTS.innerText = 'Selected TTS Provider';
+            metricLLMSub.innerText = 'OpenAI';
+            metricTTSSub.innerText = 'Selected TTS';
+            connectionStatus.innerHTML = '✨ <span style="color: var(--accent-cyan);">OpenAI Mode Active (Port 8001)</span>';
+            if (selectPipelineMode) selectPipelineMode.value = 'openai';
+            if (localSettingsSection) localSettingsSection.style.display = 'none';
+            if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
+            if (openaiSettingsSection) openaiSettingsSection.style.display = 'block';
         } else {
             btnModeCloud.classList.add('active');
             btnModeLocal.classList.remove('active');
@@ -104,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (selectPipelineMode) selectPipelineMode.value = 'cloud';
             if (localSettingsSection) localSettingsSection.style.display = 'none';
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'block';
+            if (openaiSettingsSection) openaiSettingsSection.style.display = 'none';
         }
     }
 
@@ -699,7 +716,8 @@ document.addEventListener('DOMContentLoaded', () => {
             local_voice: selectLocalVoice.value,
             groq_api_key: inputGroqKey.value.trim(),
             elevenlabs_api_key: inputElevenKey.value.trim(),
-            elevenlabs_voice_id: selectElevenVoice.value
+            elevenlabs_voice_id: selectElevenVoice.value,
+            openai_model: inputOpenAIModel.value.trim()
         };
 
         try {
@@ -729,7 +747,8 @@ document.addEventListener('DOMContentLoaded', () => {
             local_voice: selectLocalVoice.value || 'en-US-JennyNeural',
             groq_api_key: inputGroqKey.value.trim() || undefined,
             elevenlabs_api_key: inputElevenKey.value.trim() || undefined,
-            elevenlabs_voice_id: selectElevenVoice.value || undefined
+            elevenlabs_voice_id: selectElevenVoice.value || undefined,
+            openai_model: inputOpenAIModel.value.trim() || undefined
         };
     }
 
@@ -746,6 +765,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectOllamaModel.innerHTML = data.local.installed_models
                     .map(m => `<option value="${m}">${m}</option>`)
                     .join('');
+            }
+            if (data.openai && inputOpenAIModel) {
+                inputOpenAIModel.value = data.openai.model || '';
             }
         } catch (e) {
             console.warn('Could not fetch status:', e);
