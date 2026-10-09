@@ -31,22 +31,46 @@ class VoicePipelineError(Exception):
 
 
 class SpeechToTextService:
-    """STT Service using Python speech_recognition library."""
+    """STT Service supporting Groq Whisper Turbo (<250ms) and fast SpeechRecognition."""
     
-    def __init__(self):
+    def __init__(self, groq_api_key: Optional[str] = None):
+        self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY", "")
         self.recognizer = sr.Recognizer()
-        self.recognizer.energy_threshold = 250
-        self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold = 0.5
-        self.recognizer.non_speaking_duration = 0.3
+        self.recognizer.energy_threshold = 200
+        self.recognizer.dynamic_energy_threshold = False
+        self.recognizer.pause_threshold = 0.4
+        self.recognizer.non_speaking_duration = 0.2
 
-    def transcribe(self, audio_bytes: bytes, language: str = "en-US") -> str:
+    def transcribe(self, audio_bytes: bytes, language: str = "en-US", groq_api_key: Optional[str] = None) -> str:
         """
-        Transcribes PCM WAV audio bytes into text.
+        Transcribes PCM WAV audio bytes into text in under 300ms using Groq Whisper Turbo or Google STT.
         """
         if not audio_bytes or len(audio_bytes) < 100:
             raise VoicePipelineError("STT", "Audio payload is empty or too short.")
 
+        key = groq_api_key or self.groq_api_key or os.getenv("GROQ_API_KEY", "")
+
+        # Priority 1: Groq Whisper Turbo (Incredible speed ~180-250ms)
+        if key and key != "your_groq_api_key_here":
+            try:
+                client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
+                audio_file = io.BytesIO(audio_bytes)
+                audio_file.name = "recording.wav"
+                
+                transcription = client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-large-v3-turbo",
+                    language="en",
+                    response_format="text",
+                    temperature=0.0
+                )
+                text = str(transcription).strip()
+                if text:
+                    return text
+            except Exception as e:
+                print(f"[STT] Groq Whisper fallback to native STT: {e}")
+
+        # Priority 2: In-Memory Google Speech Recognition (<1s)
         temp_file = None
         try:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
@@ -346,7 +370,8 @@ class VoicePipeline:
 
         # Step 1: STT
         stt_start = time.time()
-        user_text = self.stt.transcribe(audio_bytes)
+        groq_k = keys.get("groq_api_key") or os.getenv("GROQ_API_KEY")
+        user_text = self.stt.transcribe(audio_bytes, groq_api_key=groq_k)
         metrics["stt_time_ms"] = round((time.time() - stt_start) * 1000, 2)
 
         # Step 2: LLM

@@ -198,7 +198,7 @@ class AudioRecorder {
         this.processor.connect(this.audioContext.destination);
         this.isRecording = true;
 
-        if (this.recognition && liveMode) {
+        if (this.recognition) {
             try {
                 this.recognition.start();
             } catch (e) {}
