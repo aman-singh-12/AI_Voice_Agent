@@ -3,7 +3,7 @@ import json
 import base64
 import requests
 from typing import Optional, List, Dict
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,10 @@ app = FastAPI(
     description="Voice AI Agent: SpeechRecognition (STT) -> Local Ollama Qwen / Groq (LLM) -> Local Neural / ElevenLabs (TTS)",
     version="1.1.0"
 )
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
 
 app.add_middleware(
     CORSMiddleware,
@@ -174,7 +178,7 @@ async def process_audio(
 
     except VoicePipelineError as vpe:
         return JSONResponse(
-            status_code=400,
+            status_code=200,
             content={
                 "error": True,
                 "stage": vpe.stage,
@@ -183,7 +187,7 @@ async def process_audio(
         )
     except Exception as e:
         return JSONResponse(
-            status_code=500,
+            status_code=200,
             content={
                 "error": True,
                 "stage": "UNKNOWN",
@@ -202,7 +206,7 @@ async def process_text(req: TextRequest):
         return result
     except VoicePipelineError as vpe:
         return JSONResponse(
-            status_code=400,
+            status_code=200,
             content={
                 "error": True,
                 "stage": vpe.stage,
@@ -211,7 +215,7 @@ async def process_text(req: TextRequest):
         )
     except Exception as e:
         return JSONResponse(
-            status_code=500,
+            status_code=200,
             content={
                 "error": True,
                 "stage": "UNKNOWN",
