@@ -25,6 +25,23 @@ app = FastAPI(
 async def favicon():
     return Response(status_code=204)
 
+SERVER_START_TIME = time.time()
+
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["Health"])
+@app.api_route("/api/health", methods=["GET", "HEAD"], tags=["Health"])
+async def health_check():
+    """
+    Dedicated lightweight health check endpoint for uptime monitors (e.g. UptimeRobot, Render, K8s).
+    Responds immediately with 200 OK and uptime metadata.
+    """
+    return {
+        "status": "healthy",
+        "ok": True,
+        "uptime_seconds": round(time.time() - SERVER_START_TIME, 2),
+        "timestamp": int(time.time())
+    }
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
