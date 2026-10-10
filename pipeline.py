@@ -444,10 +444,16 @@ class VoicePipeline:
 
         # Step 3: TTS
         tts_start = time.time()
-        if active_mode == "local" or (not keys.get("elevenlabs_api_key") and not os.getenv("ELEVENLABS_API_KEY")):
+        audio_mp3_bytes = None
+        if active_mode != "local" and (keys.get("elevenlabs_api_key") or os.getenv("ELEVENLABS_API_KEY")):
+            try:
+                audio_mp3_bytes = self.cloud_tts.synthesize(assistant_text)
+            except Exception as e:
+                print(f"[TTS Fallback] Cloud TTS error: {e}. Falling back to Local Neural TTS.")
+                audio_mp3_bytes = self.local_tts.synthesize(assistant_text)
+
+        if audio_mp3_bytes is None:
             audio_mp3_bytes = self.local_tts.synthesize(assistant_text)
-        else:
-            audio_mp3_bytes = self.cloud_tts.synthesize(assistant_text)
         metrics["tts_time_ms"] = round((time.time() - tts_start) * 1000, 2)
 
         metrics["total_time_ms"] = round((time.time() - total_start) * 1000, 2)
@@ -483,6 +489,9 @@ class VoicePipeline:
             self.cloud_llm.api_key = keys["groq_api_key"]
         if keys.get("groq_model"):
             self.cloud_llm.model = keys["groq_model"]
+        if keys.get("openai_model"):
+            self.openai_llm.model = keys["openai_model"]
+            self.openai_llm._verified_model = None
         if keys.get("elevenlabs_api_key"):
             self.cloud_tts.api_key = keys["elevenlabs_api_key"]
         if keys.get("elevenlabs_voice_id"):
@@ -511,10 +520,16 @@ class VoicePipeline:
 
         # TTS
         tts_start = time.time()
-        if active_mode == "local" or (not keys.get("elevenlabs_api_key") and not os.getenv("ELEVENLABS_API_KEY")):
+        audio_mp3_bytes = None
+        if active_mode != "local" and (keys.get("elevenlabs_api_key") or os.getenv("ELEVENLABS_API_KEY")):
+            try:
+                audio_mp3_bytes = self.cloud_tts.synthesize(assistant_text)
+            except Exception as e:
+                print(f"[TTS Fallback] Cloud TTS error: {e}. Falling back to Local Neural TTS.")
+                audio_mp3_bytes = self.local_tts.synthesize(assistant_text)
+
+        if audio_mp3_bytes is None:
             audio_mp3_bytes = self.local_tts.synthesize(assistant_text)
-        else:
-            audio_mp3_bytes = self.cloud_tts.synthesize(assistant_text)
         metrics["tts_time_ms"] = round((time.time() - tts_start) * 1000, 2)
 
         metrics["total_time_ms"] = round((time.time() - total_start) * 1000, 2)

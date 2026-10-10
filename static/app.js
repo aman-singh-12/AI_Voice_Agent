@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const badgePipeline = document.getElementById('badgePipeline');
 
     const btnModeLocal = document.getElementById('btnModeLocal');
+    const btnModeOpenAI = document.getElementById('btnModeOpenAI');
     const btnModeCloud = document.getElementById('btnModeCloud');
 
     const chatHistory = document.getElementById('chatHistory');
@@ -63,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const toastContainer = document.getElementById('toastContainer');
 
     // App State
-    let currentMode = 'local'; // 'local' | 'cloud'
+    let currentMode = 'local'; // 'local' | 'cloud' | 'openai'
     let interactionMode = 'live'; // 'live' | 'click' | 'hold'
     let isLiveCallActive = false;
     let isRecording = false;
@@ -79,12 +80,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     checkStatus();
 
-    // Mode Toggle Controls (Local vs Cloud)
+    // Mode Toggle Controls (Local vs OpenAI vs Cloud)
     function setPipelineMode(mode) {
         currentMode = mode;
         if (mode === 'local') {
-            btnModeLocal.classList.add('active');
-            btnModeCloud.classList.remove('active');
+            if (btnModeLocal) btnModeLocal.classList.add('active');
+            if (btnModeCloud) btnModeCloud.classList.remove('active');
+            if (btnModeOpenAI) btnModeOpenAI.classList.remove('active');
             badgePipeline.innerText = 'Local Ollama (Qwen 2.5)';
             textLLM.innerText = 'Local Ollama (Qwen 2.5)';
             textTTS.innerText = 'Local Neural Voice';
@@ -96,8 +98,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
             if (openaiSettingsSection) openaiSettingsSection.style.display = 'none';
         } else if (mode === 'openai') {
-            btnModeCloud.classList.remove('active');
-            btnModeLocal.classList.remove('active');
+            if (btnModeOpenAI) btnModeOpenAI.classList.add('active');
+            if (btnModeCloud) btnModeCloud.classList.remove('active');
+            if (btnModeLocal) btnModeLocal.classList.remove('active');
             badgePipeline.innerText = 'OpenAI Responses API';
             textLLM.innerText = 'OpenAI Responses API';
             textTTS.innerText = 'Selected TTS Provider';
@@ -109,8 +112,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
             if (openaiSettingsSection) openaiSettingsSection.style.display = 'block';
         } else {
-            btnModeCloud.classList.add('active');
-            btnModeLocal.classList.remove('active');
+            if (btnModeCloud) btnModeCloud.classList.add('active');
+            if (btnModeLocal) btnModeLocal.classList.remove('active');
+            if (btnModeOpenAI) btnModeOpenAI.classList.remove('active');
             badgePipeline.innerText = 'Cloud (Groq + 11Labs)';
             textLLM.innerText = 'Groq (LPU Inference)';
             textTTS.innerText = 'ElevenLabs REST API';
@@ -124,8 +128,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    btnModeLocal.addEventListener('click', () => setPipelineMode('local'));
-    btnModeCloud.addEventListener('click', () => setPipelineMode('cloud'));
+    if (btnModeLocal) btnModeLocal.addEventListener('click', () => setPipelineMode('local'));
+    if (btnModeOpenAI) btnModeOpenAI.addEventListener('click', () => setPipelineMode('openai'));
+    if (btnModeCloud) btnModeCloud.addEventListener('click', () => setPipelineMode('cloud'));
 
     if (selectPipelineMode) {
         selectPipelineMode.addEventListener('change', (e) => {

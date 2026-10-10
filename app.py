@@ -1,9 +1,10 @@
 import os
 import json
 import base64
+import time
 import requests
 from typing import Optional, List, Dict
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Response
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -242,6 +243,161 @@ async def process_text(req: TextRequest):
                 "message": f"Server error: {str(e)}"
             }
         )
+
+@app.websocket("/ws/voice")
+async def websocket_voice_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time Voice AI interaction.
+    Accepts text JSON, base64 audio, or binary audio frames, and yields synthesized voice speech.
+    """
+    await websocket.accept()
+    session_history: List[Dict[str, str]] = []
+    session_keys: Dict[str, str] = {}
+
+    try:
+        while True:
+            message = await websocket.receive()
+
+            if "text" in message and message["text"]:
+                raw_text = message["text"]
+                try:
+                    data = json.loads(raw_text)
+                except Exception:
+                    data = {"text": raw_text}
+
+                msg_type = data.get("type", "text")
+
+                if msg_type == "ping":
+                    await websocket.send_json({"type": "pong", "time": time.time()})
+                    continue
+
+                if msg_type == "config":
+                    if "keys" in data and isinstance(data["keys"], dict):
+                        session_keys.update(data["keys"])
+                    if "pipeline_mode" in data:
+                        session_keys["pipeline_mode"] = data["pipeline_mode"]
+                    await websocket.send_json({"type": "config_ack", "status": "ok"})
+                    continue
+
+                if msg_type == "audio" or "audio" in data:
+                    audio_b64 = data.get("audio", "")
+                    if "," in audio_b64:
+                        audio_b64 = audio_b64.split(",", 1)[1]
+                    try:
+                        audio_bytes = base64.b64decode(audio_b64)
+                        history = data.get("history", session_history)
+                        custom_keys = data.get("keys", session_keys)
+
+                        result = pipeline.process_voice(
+                            audio_bytes=audio_bytes,
+                            conversation_history=history,
+                            custom_keys=custom_keys
+                        )
+                        if result.get("user_text"):
+                            session_history.append({"role": "user", "content": result["user_text"]})
+                        if result.get("assistant_text"):
+                            session_history.append({"role": "assistant", "content": result["assistant_text"]})
+
+                        await websocket.send_json({
+                            "type": "response",
+                            **result
+                        })
+                    except VoicePipelineError as vpe:
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": True,
+                            "stage": vpe.stage,
+                            "message": vpe.message
+                        })
+                    except Exception as e:
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": True,
+                            "stage": "UNKNOWN",
+                            "message": f"Server error: {str(e)}"
+                        })
+                    continue
+
+                # Text handling
+                prompt_text = data.get("text") or data.get("message") or data.get("prompt") or raw_text
+                history = data.get("history", session_history)
+                custom_keys = data.get("keys", session_keys)
+
+                try:
+                    result = pipeline.process_text_only(
+                        user_text=prompt_text,
+                        conversation_history=history,
+                        custom_keys=custom_keys
+                    )
+                    session_history.append({"role": "user", "content": prompt_text})
+                    if result.get("assistant_text"):
+                        session_history.append({"role": "assistant", "content": result["assistant_text"]})
+
+                    await websocket.send_json({
+                        "type": "response",
+                        **result
+                    })
+                except VoicePipelineError as vpe:
+                    await websocket.send_json({
+                        "type": "error",
+                        "error": True,
+                        "stage": vpe.stage,
+                        "message": vpe.message
+                    })
+                except Exception as e:
+                    await websocket.send_json({
+                        "type": "error",
+                        "error": True,
+                        "stage": "UNKNOWN",
+                        "message": f"Server error: {str(e)}"
+                    })
+
+            elif "bytes" in message and message["bytes"]:
+                audio_bytes = message["bytes"]
+                try:
+                    result = pipeline.process_voice(
+                        audio_bytes=audio_bytes,
+                        conversation_history=session_history,
+                        custom_keys=session_keys
+                    )
+                    if result.get("user_text"):
+                        session_history.append({"role": "user", "content": result["user_text"]})
+                    if result.get("assistant_text"):
+                        session_history.append({"role": "assistant", "content": result["assistant_text"]})
+
+                    await websocket.send_json({
+                        "type": "response",
+                        **result
+                    })
+                except VoicePipelineError as vpe:
+                    await websocket.send_json({
+                        "type": "error",
+                        "error": True,
+                        "stage": vpe.stage,
+                        "message": vpe.message
+                    })
+                except Exception as e:
+                    await websocket.send_json({
+                        "type": "error",
+                        "error": True,
+                        "stage": "UNKNOWN",
+                        "message": f"Server error: {str(e)}"
+                    })
+
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    except Exception as e:
+        print(f"WebSocket /ws/voice error: {e}")
+
+@app.get("/ws/voice")
+async def ws_voice_info():
+    """Information endpoint for clients querying /ws/voice over HTTP."""
+    return {
+        "status": "online",
+        "protocol": "websocket",
+        "endpoint": "/ws/voice",
+        "message": "Voice AI WebSocket is active. Connect using ws:// or wss:// protocol."
+    }
 
 # Static files
 os.makedirs("static", exist_ok=True)

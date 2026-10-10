@@ -20,13 +20,15 @@ class AudioRecorder {
         this.onSpeechTranscript = null; // High-speed instant transcribed text (0ms STT latency)
         this.onSilenceDetected = null;  // WAV fallback
 
-        // High-Speed VAD Parameters
-        this.speechThreshold = 0.020;
-        this.silenceDurationMs = 1600; // Commercial Voice standard: 1.6s pause required before triggering AI response
+        // High-Speed Adaptive VAD Parameters
+        this.baseThreshold = 0.015;
+        this.noiseFloor = 0.008;
+        this.silenceDurationMs = 1200; // Default 1.2s pause before triggering AI response
         this.hasSpokenInTurn = false;
-        this.silenceStartTime = null;
+        this.lastSpeechTime = 0;
         this.speechStartTime = null;
         this.isMuted = false;
+        this.finalTranscriptTimer = null;
 
         // Native Web Speech Recognition for continuous transcription
         this.recognition = null;
@@ -37,7 +39,7 @@ class AudioRecorder {
     }
 
     setSilenceDuration(ms) {
-        this.silenceDurationMs = Math.max(800, Math.min(4000, ms));
+        this.silenceDurationMs = Math.max(600, Math.min(4000, ms));
         console.log(`VAD Silence threshold updated to: ${this.silenceDurationMs}ms`);
     }
 
@@ -58,12 +60,13 @@ class AudioRecorder {
                 if (this.isMuted) return;
                 let fullFinal = '';
                 let interim = '';
+                let hasFinalChunk = false;
 
-                // Only read results for the CURRENT turn (ignore previous turns)
                 const startIndex = Math.max(0, this.turnStartIndex || 0);
                 for (let i = startIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
                         fullFinal += event.results[i][0].transcript + ' ';
+                        hasFinalChunk = true;
                     } else {
                         interim += event.results[i][0].transcript;
                     }
@@ -72,18 +75,37 @@ class AudioRecorder {
                 const currentText = (fullFinal + interim).trim();
                 if (currentText) {
                     this.currentLiveTranscript = currentText;
+                    this.lastSpeechTime = Date.now();
                     if (!this.hasSpokenInTurn) {
                         this.hasSpokenInTurn = true;
                         this.speechStartTime = Date.now();
                         if (this.onSpeechStart) this.onSpeechStart();
                     }
-                    // Reset silence timer on any detected speech or filler
-                    this.silenceStartTime = null;
+
+                    // If a final sentence was recognized, schedule a quick turn trigger
+                    if (hasFinalChunk && this.isLiveCall) {
+                        if (this.finalTranscriptTimer) clearTimeout(this.finalTranscriptTimer);
+                        this.finalTranscriptTimer = setTimeout(() => {
+                            if (this.hasSpokenInTurn && !this.isMuted) {
+                                this.triggerTurn();
+                            }
+                        }, Math.min(800, this.silenceDurationMs));
+                    }
+                }
+            };
+
+            this.recognition.onspeechend = () => {
+                if (this.hasSpokenInTurn && !this.isMuted && this.isLiveCall) {
+                    if (this.finalTranscriptTimer) clearTimeout(this.finalTranscriptTimer);
+                    this.finalTranscriptTimer = setTimeout(() => {
+                        if (this.hasSpokenInTurn && !this.isMuted) {
+                            this.triggerTurn();
+                        }
+                    }, 600);
                 }
             };
 
             this.recognition.onend = () => {
-                // Auto-restart with clean turn index if live call is still active and unmuted
                 if (this.isLiveCall && this.isRecording && !this.isMuted) {
                     try {
                         this.turnStartIndex = 0;
@@ -102,15 +124,38 @@ class AudioRecorder {
         }
     }
 
+    triggerTurn() {
+        if (!this.hasSpokenInTurn || this.isMuted) return;
+        if (this.finalTranscriptTimer) {
+            clearTimeout(this.finalTranscriptTimer);
+            this.finalTranscriptTimer = null;
+        }
+
+        const transcriptToSend = (this.currentLiveTranscript || "").trim();
+        const wavBlob = this.exportCurrentBuffer();
+
+        this.hasSpokenInTurn = false;
+        this.lastSpeechTime = 0;
+        this.currentLiveTranscript = "";
+        this.audioData = [];
+
+        if (transcriptToSend && this.onSpeechTranscript) {
+            this.onSpeechTranscript(transcriptToSend);
+        } else if (wavBlob && this.onSilenceDetected) {
+            this.onSilenceDetected(wavBlob);
+        }
+    }
+
     async start(liveMode = false) {
         if (this.isRecording) return;
         this.audioData = [];
         this.isLiveCall = liveMode;
         this.hasSpokenInTurn = false;
-        this.silenceStartTime = null;
+        this.lastSpeechTime = 0;
         this.speechStartTime = null;
         this.currentLiveTranscript = "";
         this.isMuted = false;
+        this.noiseFloor = 0.008;
 
         // Request microphone access
         this.mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -131,7 +176,7 @@ class AudioRecorder {
         this.analyser.fftSize = 256;
         this.source.connect(this.analyser);
 
-        const bufferSize = 2048; // Lower buffer size for lower latency
+        const bufferSize = 2048;
         this.processor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
 
         this.processor.onaudioprocess = (e) => {
@@ -154,43 +199,33 @@ class AudioRecorder {
             if (this.isLiveCall && !this.isMuted) {
                 const now = Date.now();
 
-                if (rms > this.speechThreshold) {
+                // Dynamically calibrate ambient noise floor
+                if (!this.hasSpokenInTurn) {
+                    this.noiseFloor = this.noiseFloor * 0.96 + rms * 0.04;
+                }
+                const dynamicThreshold = Math.max(this.baseThreshold, this.noiseFloor * 2.2);
+
+                if (rms > dynamicThreshold) {
                     if (!this.hasSpokenInTurn) {
                         this.hasSpokenInTurn = true;
                         this.speechStartTime = now;
                         this.audioData = [];
                         if (this.onSpeechStart) this.onSpeechStart();
                     }
-                    this.silenceStartTime = null;
+                    this.lastSpeechTime = now;
                     this.audioData.push(channelCopy);
                 } else {
                     if (this.hasSpokenInTurn) {
                         this.audioData.push(channelCopy);
 
-                        if (!this.silenceStartTime) {
-                            this.silenceStartTime = now;
-                        } else if (now - this.silenceStartTime >= this.silenceDurationMs) {
-                            // 450ms Silence passed! User finished speaking
+                        // Check if silence period elapsed
+                        if (this.lastSpeechTime > 0 && (now - this.lastSpeechTime >= this.silenceDurationMs)) {
                             const speechDuration = now - (this.speechStartTime || now);
-                            if (speechDuration >= 350) {
-                                const transcriptToSend = this.currentLiveTranscript.trim();
-                                const wavBlob = this.exportCurrentBuffer();
-
-                                this.hasSpokenInTurn = false;
-                                this.silenceStartTime = null;
-                                this.currentLiveTranscript = "";
-                                this.audioData = [];
-
-                                if (transcriptToSend && this.onSpeechTranscript) {
-                                    // Zero-latency instant transcription path
-                                    this.onSpeechTranscript(transcriptToSend);
-                                } else if (wavBlob && this.onSilenceDetected) {
-                                    // Audio fallback path
-                                    this.onSilenceDetected(wavBlob);
-                                }
+                            if (speechDuration >= 250) {
+                                this.triggerTurn();
                             } else {
                                 this.hasSpokenInTurn = false;
-                                this.silenceStartTime = null;
+                                this.lastSpeechTime = 0;
                                 this.audioData = [];
                             }
                         }
@@ -215,17 +250,19 @@ class AudioRecorder {
     setMuted(muted) {
         this.isMuted = muted;
         this.hasSpokenInTurn = false;
-        this.silenceStartTime = null;
+        this.lastSpeechTime = 0;
         this.currentLiveTranscript = "";
         this.audioData = [];
+        if (this.finalTranscriptTimer) {
+            clearTimeout(this.finalTranscriptTimer);
+            this.finalTranscriptTimer = null;
+        }
 
         if (muted) {
-            // Stop recognition completely while AI is speaking so it doesn't hear itself
             if (this.recognition) {
                 try { this.recognition.abort(); } catch (e) {}
             }
         } else {
-            // Clean state for fresh turn: re-initialize recognition with zero previous history
             if (this.isLiveCall && this.isRecording) {
                 this.turnStartIndex = 0;
                 this.initSpeechRecognition();

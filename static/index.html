@@ -27,8 +27,9 @@
         <div class="header-actions">
             <!-- Mode Switcher -->
             <div class="mode-toggle" style="margin: 0;">
-                <button class="mode-btn active" id="btnModeLocal">💻 100% Local (0 Keys)</button>
-                <button class="mode-btn" id="btnModeCloud">☁️ Cloud (Groq / 11Labs)</button>
+                <button class="mode-btn active" id="btnModeLocal">💻 Local</button>
+                <button class="mode-btn" id="btnModeOpenAI">✨ OpenAI</button>
+                <button class="mode-btn" id="btnModeCloud">☁️ Groq Cloud</button>
             </div>
 
             <button class="btn-icon" id="btnClearChat" title="Clear Conversation">
@@ -231,8 +232,9 @@
                 <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
                     <label for="selectSilenceDuration">Turn-Taking Pause Delay (Silence Threshold)</label>
                     <select id="selectSilenceDuration">
-                        <option value="1200">1.2 Seconds (Fast turnaround)</option>
-                        <option value="1600" selected>1.6 Seconds (Standard Commercial Voice - Recommended)</option>
+                        <option value="800">0.8 Seconds (Ultra-Fast Response)</option>
+                        <option value="1200" selected>1.2 Seconds (Natural Turnaround - Recommended)</option>
+                        <option value="1600">1.6 Seconds (Standard Voice)</option>
                         <option value="2000">2.0 Seconds (Long Sentences & Thinking Pauses)</option>
                         <option value="2500">2.5 Seconds (Extended Thinking Time)</option>
                     </select>

@@ -11,6 +11,10 @@ if errorlevel 1 (
 )
 
 REM Activate Virtual Environment and Launch Server
-call venv\Scripts\activate.bat
-python run_server.py
+if exist "venv\Scripts\python.exe" (
+    venv\Scripts\python.exe run_server.py
+) else (
+    call venv\Scripts\activate.bat
+    python run_server.py
+)
 pause

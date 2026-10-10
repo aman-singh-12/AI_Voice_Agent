@@ -6,3 +6,5 @@ SpeechRecognition
 openai
 python-dotenv
 edge-tts
+wsproto
+websockets
