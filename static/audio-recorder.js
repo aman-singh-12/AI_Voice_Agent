@@ -57,7 +57,10 @@ class AudioRecorder {
             this.recognition.lang = 'en-US';
 
             this.recognition.onresult = (event) => {
-                if (this.isMuted) return;
+                if (this.isMuted) {
+                    this.turnStartIndex = event.results.length;
+                    return;
+                }
                 let fullFinal = '';
                 let interim = '';
                 let hasFinalChunk = false;
@@ -106,7 +109,7 @@ class AudioRecorder {
             };
 
             this.recognition.onend = () => {
-                if (this.isLiveCall && this.isRecording && !this.isMuted) {
+                if (this.isLiveCall && this.isRecording) {
                     try {
                         this.turnStartIndex = 0;
                         this.recognition.start();
@@ -262,16 +265,16 @@ class AudioRecorder {
         }
 
         if (muted) {
-            if (this.recognition) {
-                try { this.recognition.abort(); } catch (e) {}
-            }
+            // Keep speech recognition session alive in background
         } else {
-            if (this.isLiveCall && this.isRecording) {
-                this.turnStartIndex = 0;
-                this.initSpeechRecognition();
+            // Unmuted: immediate hot listening (<10ms)
+            this.noiseFloor = 0.008;
+            if (this.recognition && this.isLiveCall && this.isRecording) {
                 try {
                     this.recognition.start();
-                } catch (e) {}
+                } catch (e) {
+                    // Already running
+                }
             }
         }
     }
@@ -304,7 +307,7 @@ class AudioRecorder {
         const wavBlob = this.exportCurrentBuffer();
 
         if (this.recognition) {
-            try { this.recognition.stop(); } catch (e) {}
+            try { this.recognition.abort(); } catch (e) {}
         }
         if (this.processor) {
             this.processor.disconnect();

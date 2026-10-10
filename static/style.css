@@ -36,14 +36,22 @@
     padding: 0;
 }
 
+html, body {
+    height: 100%;
+    max-height: 100vh;
+    max-height: 100dvh;
+    overflow: hidden;
+}
+
 body {
     font-family: var(--font-family);
     background-color: var(--bg-primary);
     color: var(--text-primary);
-    min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
-    overflow-x: hidden;
+    overflow: hidden;
     position: relative;
     background-image: 
         radial-gradient(circle at 10% 15%, rgba(16, 185, 129, 0.08) 0%, transparent 40%),
@@ -53,15 +61,14 @@ body {
 
 /* Header */
 header {
+    flex-shrink: 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.9rem 2rem;
+    padding: 0.75rem 2rem;
     border-bottom: 1px solid var(--border-color);
     background: rgba(255, 255, 255, 0.92);
     backdrop-filter: blur(12px);
-    position: sticky;
-    top: 0;
     z-index: 100;
     box-shadow: var(--shadow-sm);
 }
@@ -142,134 +149,56 @@ main {
     max-width: 1200px;
     width: 100%;
     margin: 0 auto;
-    padding: 1.5rem 1.5rem 4rem;
+    padding: 1.25rem 1.5rem 1.5rem;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 1.5rem;
+    height: calc(100vh - 65px);
+    height: calc(100dvh - 65px);
+    min-height: 0;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 @media (max-width: 900px) {
+    html, body {
+        overflow: auto;
+    }
     main {
         grid-template-columns: 1fr;
         padding: 1rem 1rem 3rem;
+        height: auto;
+        overflow: visible;
     }
-}
-
-/* Pipeline Status Card */
-.pipeline-status-card {
-    grid-column: 1 / -1;
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 14px;
-    padding: 0.85rem 1.4rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    box-shadow: var(--shadow-card);
-}
-
-.pipeline-nodes {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-}
-
-.node {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.35rem 0.75rem;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    font-size: 0.82rem;
-    color: var(--text-secondary);
-    transition: all 0.3s ease;
-}
-
-.node.active {
-    background: var(--accent-mint-subtle);
-    border-color: var(--accent-emerald);
-    box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
-    color: var(--accent-emerald-dark);
-    font-weight: 600;
-}
-
-.node.active-llm {
-    background: #eff6ff;
-    border-color: #3b82f6;
-    box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
-    color: #1d4ed8;
-    font-weight: 600;
-}
-
-.node.active-tts {
-    background: var(--accent-mint-subtle);
-    border-color: var(--accent-emerald);
-    box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
-    color: var(--accent-emerald-dark);
-    font-weight: 600;
-}
-
-.node-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--text-muted);
-}
-
-.node.active .node-dot {
-    background: var(--accent-emerald);
-    animation: blink 1s infinite alternate;
-}
-
-.node.active-llm .node-dot {
-    background: #3b82f6;
-    animation: blink 1s infinite alternate;
-}
-
-.node.active-tts .node-dot {
-    background: var(--accent-emerald);
-    animation: blink 1s infinite alternate;
-}
-
-.node-arrow {
-    color: var(--text-muted);
-    font-size: 0.75rem;
-}
-
-@keyframes blink {
-    from { opacity: 0.4; transform: scale(0.85); }
-    to { opacity: 1; transform: scale(1.2); }
 }
 
 /* Stage Panel (Left Column) */
 .stage-panel {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 2rem 1.5rem;
+    border-radius: 18px;
+    padding: 1.25rem 1.5rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: space-evenly;
     position: relative;
     box-shadow: var(--shadow-card);
-    min-height: 480px;
+    height: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 /* Glowing Ambient Orb */
 .orb-container {
     position: relative;
-    width: 220px;
-    height: 220px;
+    width: 200px;
+    height: 200px;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 1.5rem 0;
+    margin: 0;
 }
 
 .orb-ring {
@@ -279,15 +208,15 @@ main {
 }
 
 .orb-ring-1 {
-    width: 220px;
-    height: 220px;
+    width: 200px;
+    height: 200px;
     border: 1px dashed rgba(6, 182, 212, 0.2);
     animation: rotateRing 20s linear infinite;
 }
 
 .orb-ring-2 {
-    width: 170px;
-    height: 170px;
+    width: 155px;
+    height: 155px;
     border: 1px solid rgba(139, 92, 246, 0.2);
 }
 
@@ -356,13 +285,13 @@ main {
 .visualizer-canvas {
     width: 220px;
     height: 32px;
-    margin-top: 0.5rem;
+    margin-top: 0.25rem;
 }
 
 .stage-status-text {
     font-size: 1.1rem;
     font-weight: 600;
-    margin-top: 0.6rem;
+    margin-top: 0.4rem;
     color: var(--text-primary);
     text-align: center;
 }
@@ -376,7 +305,7 @@ main {
 
 /* Stage Mode Selector */
 .mode-toggle {
-    margin-top: 1.25rem;
+    margin-top: 0.85rem;
     display: flex;
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
@@ -409,15 +338,18 @@ main {
 .transcript-panel {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 16px;
+    border-radius: 18px;
     display: flex;
     flex-direction: column;
     box-shadow: var(--shadow-card);
-    height: 520px;
+    height: 100%;
+    min-height: 0;
     overflow: hidden;
+    box-sizing: border-box;
 }
 
 .panel-header {
+    flex-shrink: 0;
     padding: 0.85rem 1.25rem;
     border-bottom: 1px solid var(--border-color);
     display: flex;
@@ -437,6 +369,7 @@ main {
 
 .chat-history-container {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 1.25rem;
     display: flex;
@@ -546,6 +479,7 @@ main {
 
 /* Chat Input Bar */
 .chat-input-bar {
+    flex-shrink: 0;
     padding: 0.75rem 1rem;
     border-top: 1px solid var(--border-color);
     display: flex;

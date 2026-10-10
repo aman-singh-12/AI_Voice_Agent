@@ -44,29 +44,6 @@
     </header>
 
     <main>
-        <!-- Pipeline Architecture Flow Banner -->
-        <section class="pipeline-status-card">
-            <div class="pipeline-nodes">
-                <div class="node" id="nodeSTT">
-                    <div class="node-dot"></div>
-                    <strong>1. STT:</strong> <span>Voice Input</span>
-                </div>
-                <span class="node-arrow">➔</span>
-                <div class="node" id="nodeLLM">
-                    <div class="node-dot"></div>
-                    <strong id="labelLLM">2. LLM:</strong> <span id="textLLM">Local Ollama (Qwen 2.5)</span>
-                </div>
-                <span class="node-arrow">➔</span>
-                <div class="node" id="nodeTTS">
-                    <div class="node-dot"></div>
-                    <strong id="labelTTS">3. TTS:</strong> <span id="textTTS">Neural Voice</span>
-                </div>
-            </div>
-            <div id="connectionStatus" style="font-size: 0.8rem; font-weight: 600; color: var(--accent-emerald-dark);">
-                ● Ready
-            </div>
-        </section>
-
         <!-- Voice Interaction Stage (Left Column) -->
         <section class="stage-panel">
             <div class="orb-container">
@@ -94,7 +71,6 @@
                 <div class="mode-toggle">
                     <button class="mode-btn active" id="modeLive">📞 Live Call</button>
                     <button class="mode-btn" id="modeClick">🖱️ Click to Talk</button>
-                    <button class="mode-btn" id="modeHold">⌨️ Hold to Talk</button>
                 </div>
             </div>
         </section>
@@ -125,30 +101,6 @@
                     <svg width="13" height="13" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                 </button>
             </form>
-        </section>
-
-        <!-- Pipeline Latency Metrics Row -->
-        <section class="metrics-row">
-            <div class="metric-card">
-                <span class="metric-label">STT</span>
-                <span class="metric-value" id="metricSTT">0 ms</span>
-                <span class="metric-sub">Speech Recognition</span>
-            </div>
-            <div class="metric-card">
-                <span class="metric-label">LLM</span>
-                <span class="metric-value" id="metricLLM">0 ms</span>
-                <span class="metric-sub" id="metricLLMSub">Local Qwen 2.5</span>
-            </div>
-            <div class="metric-card">
-                <span class="metric-label">TTS</span>
-                <span class="metric-value" id="metricTTS">0 ms</span>
-                <span class="metric-sub" id="metricTTSSub">Neural Voice</span>
-            </div>
-            <div class="metric-card">
-                <span class="metric-label">Total</span>
-                <span class="metric-value" id="metricTotal">0 ms</span>
-                <span class="metric-sub">Voice to Voice</span>
-            </div>
         </section>
     </main>
 

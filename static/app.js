@@ -11,7 +11,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const modeLive = document.getElementById('modeLive');
     const modeClick = document.getElementById('modeClick');
-    const modeHold = document.getElementById('modeHold');
     const btnLiveCall = document.getElementById('btnLiveCall');
 
     const nodeSTT = document.getElementById('nodeSTT');
@@ -65,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // App State
     let currentMode = 'local'; // 'local' | 'cloud' | 'openai'
-    let interactionMode = 'live'; // 'live' | 'click' | 'hold'
+    let interactionMode = 'live'; // 'live' | 'click'
     let isLiveCallActive = false;
     let isRecording = false;
     let isProcessing = false;
@@ -73,6 +72,29 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentAudio = null;
     let conversationHistory = [];
     const recorder = new AudioRecorder();
+
+    // 5-Second Inactivity / Silence Auto-Off Timer
+    let liveCallInactivityTimer = null;
+    const INACTIVITY_TIMEOUT_MS = 5000;
+
+    function startInactivityTimer() {
+        clearInactivityTimer();
+        if (!isLiveCallActive) return;
+        liveCallInactivityTimer = setTimeout(() => {
+            if (isLiveCallActive && !isProcessing && !isSpeaking && !recorder.hasSpokenInTurn) {
+                console.log('No speech detected for 5s. Auto-ending live call.');
+                endLiveCall();
+                showToast('Voice call ended (5s silence)', 'info');
+            }
+        }, INACTIVITY_TIMEOUT_MS);
+    }
+
+    function clearInactivityTimer() {
+        if (liveCallInactivityTimer) {
+            clearTimeout(liveCallInactivityTimer);
+            liveCallInactivityTimer = null;
+        }
+    }
 
     // Canvas Visualizer Setup
     const canvasCtx = visualizerCanvas.getContext('2d');
@@ -87,12 +109,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btnModeLocal) btnModeLocal.classList.add('active');
             if (btnModeCloud) btnModeCloud.classList.remove('active');
             if (btnModeOpenAI) btnModeOpenAI.classList.remove('active');
-            badgePipeline.innerText = 'Local Ollama';
-            textLLM.innerText = 'Local Ollama (Qwen 2.5)';
-            textTTS.innerText = 'Neural Voice';
-            metricLLMSub.innerText = 'Local Ollama';
-            metricTTSSub.innerText = 'Local TTS';
-            connectionStatus.innerHTML = '● <span style="color: var(--accent-emerald-dark);">Active (Local)</span>';
+            if (badgePipeline) badgePipeline.innerText = 'Local Ollama';
+            if (textLLM) textLLM.innerText = 'Local Ollama (Qwen 2.5)';
+            if (textTTS) textTTS.innerText = 'Neural Voice';
+            if (metricLLMSub) metricLLMSub.innerText = 'Local Ollama';
+            if (metricTTSSub) metricTTSSub.innerText = 'Local TTS';
+            if (connectionStatus) connectionStatus.innerHTML = '● <span style="color: var(--accent-emerald-dark);">Active (Local)</span>';
             if (selectPipelineMode) selectPipelineMode.value = 'local';
             if (localSettingsSection) localSettingsSection.style.display = 'block';
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
@@ -101,12 +123,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btnModeOpenAI) btnModeOpenAI.classList.add('active');
             if (btnModeCloud) btnModeCloud.classList.remove('active');
             if (btnModeLocal) btnModeLocal.classList.remove('active');
-            badgePipeline.innerText = 'OpenAI API';
-            textLLM.innerText = 'OpenAI Responses API';
-            textTTS.innerText = 'Neural Voice';
-            metricLLMSub.innerText = 'OpenAI';
-            metricTTSSub.innerText = 'Selected TTS';
-            connectionStatus.innerHTML = '● <span style="color: var(--accent-blue);">Active (OpenAI)</span>';
+            if (badgePipeline) badgePipeline.innerText = 'OpenAI API';
+            if (textLLM) textLLM.innerText = 'OpenAI Responses API';
+            if (textTTS) textTTS.innerText = 'Neural Voice';
+            if (metricLLMSub) metricLLMSub.innerText = 'OpenAI';
+            if (metricTTSSub) metricTTSSub.innerText = 'Selected TTS';
+            if (connectionStatus) connectionStatus.innerHTML = '● <span style="color: var(--accent-blue);">Active (OpenAI)</span>';
             if (selectPipelineMode) selectPipelineMode.value = 'openai';
             if (localSettingsSection) localSettingsSection.style.display = 'none';
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
@@ -115,12 +137,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btnModeCloud) btnModeCloud.classList.add('active');
             if (btnModeLocal) btnModeLocal.classList.remove('active');
             if (btnModeOpenAI) btnModeOpenAI.classList.remove('active');
-            badgePipeline.innerText = 'Groq Cloud';
-            textLLM.innerText = 'Groq (LPU)';
-            textTTS.innerText = 'ElevenLabs';
-            metricLLMSub.innerText = 'Groq LPU';
-            metricTTSSub.innerText = 'ElevenLabs';
-            connectionStatus.innerHTML = '● <span style="color: var(--accent-cyan);">Active (Cloud)</span>';
+            if (badgePipeline) badgePipeline.innerText = 'Groq Cloud';
+            if (textLLM) textLLM.innerText = 'Groq (LPU)';
+            if (textTTS) textTTS.innerText = 'ElevenLabs';
+            if (metricLLMSub) metricLLMSub.innerText = 'Groq LPU';
+            if (metricTTSSub) metricTTSSub.innerText = 'ElevenLabs';
+            if (connectionStatus) connectionStatus.innerHTML = '● <span style="color: var(--accent-cyan);">Active (Cloud)</span>';
             if (selectPipelineMode) selectPipelineMode.value = 'cloud';
             if (localSettingsSection) localSettingsSection.style.display = 'none';
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'block';
@@ -161,11 +183,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----------------------------------------------------
     recorder.onVolumeChange = (vol) => {
         if (!recorder.isRecording || recorder.isMuted) return;
+        if (vol > 0.08) {
+            clearInactivityTimer();
+        }
         const scale = 1 + vol * 0.3;
         voiceOrb.style.transform = `scale(${scale})`;
     };
 
     recorder.onSpeechStart = () => {
+        clearInactivityTimer();
         if (isLiveCallActive && !isProcessing && !isSpeaking) {
             voiceOrb.className = 'voice-orb recording';
             statusHeading.innerText = 'Listening...';
@@ -175,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Instant zero-delay transcript path (< 50ms)
     recorder.onSpeechTranscript = async (text) => {
+        clearInactivityTimer();
         if (isLiveCallActive && !isProcessing && !isSpeaking && text) {
             recorder.setMuted(true);
             await processText(text);
@@ -183,6 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Audio blob fallback path
     recorder.onSilenceDetected = async (wavBlob) => {
+        clearInactivityTimer();
         if (isLiveCallActive && !isProcessing && !isSpeaking && wavBlob) {
             recorder.setMuted(true);
             await processAudio(wavBlob);
@@ -233,10 +261,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // State UI Updates
     // ----------------------------------------------------
     function setState(state, message = '') {
-        voiceOrb.className = 'voice-orb';
-        nodeSTT.className = 'node';
-        nodeLLM.className = 'node';
-        nodeTTS.className = 'node';
+        if (voiceOrb) voiceOrb.className = 'voice-orb';
+        if (nodeSTT) nodeSTT.className = 'node';
+        if (nodeLLM) nodeLLM.className = 'node';
+        if (nodeTTS) nodeTTS.className = 'node';
 
         switch (state) {
             case 'IDLE':
@@ -244,62 +272,70 @@ document.addEventListener('DOMContentLoaded', () => {
                 isProcessing = false;
                 isSpeaking = false;
                 if (isLiveCallActive) {
-                    voiceOrb.classList.add('speaking');
-                    statusHeading.innerText = 'In Call (Listening)';
-                    statusSubtext.innerText = 'Speak anytime. AI will reply when you pause.';
+                    if (voiceOrb) voiceOrb.classList.add('speaking');
+                    if (statusHeading) statusHeading.innerText = 'In Call (Listening)';
+                    if (statusSubtext) statusSubtext.innerText = 'Speak anytime (auto-ends after 5s silence)';
                     recorder.setMuted(false);
+                    startInactivityTimer();
                 } else {
-                    statusHeading.innerText = 'Ready to talk';
-                    statusSubtext.innerText = 'Click "Start Voice Call" or tap the orb';
+                    clearInactivityTimer();
+                    if (statusHeading) statusHeading.innerText = 'Ready to talk';
+                    if (statusSubtext) statusSubtext.innerText = 'Click "Start Voice Call" or tap the orb';
                     stopVisualizer();
                 }
                 break;
 
             case 'RECORDING':
+                clearInactivityTimer();
                 isRecording = true;
-                voiceOrb.classList.add('recording');
-                statusHeading.innerText = 'Listening...';
-                statusSubtext.innerText = interactionMode === 'hold' ? 'Release when done' : 'Click when finished';
+                if (voiceOrb) voiceOrb.classList.add('recording');
+                if (statusHeading) statusHeading.innerText = 'Listening...';
+                if (statusSubtext) statusSubtext.innerText = 'Click when finished';
                 startVisualizer();
                 break;
 
             case 'STT':
+                clearInactivityTimer();
                 isProcessing = true;
-                voiceOrb.classList.add('processing');
-                nodeSTT.classList.add('active');
-                statusHeading.innerText = 'Transcribing...';
-                statusSubtext.innerText = 'Processing speech input';
+                if (voiceOrb) voiceOrb.classList.add('processing');
+                if (nodeSTT) nodeSTT.classList.add('active');
+                if (statusHeading) statusHeading.innerText = 'Transcribing...';
+                if (statusSubtext) statusSubtext.innerText = 'Processing speech input';
                 break;
 
             case 'LLM':
+                clearInactivityTimer();
                 isProcessing = true;
-                voiceOrb.classList.add('processing');
-                nodeLLM.classList.add('active-llm');
-                statusHeading.innerText = 'Thinking...';
-                statusSubtext.innerText = 'Generating response';
+                if (voiceOrb) voiceOrb.classList.add('processing');
+                if (nodeLLM) nodeLLM.classList.add('active-llm');
+                if (statusHeading) statusHeading.innerText = 'Thinking...';
+                if (statusSubtext) statusSubtext.innerText = 'Generating response';
                 break;
 
             case 'TTS':
+                clearInactivityTimer();
                 isProcessing = true;
-                voiceOrb.classList.add('processing');
-                nodeTTS.classList.add('active-tts');
-                statusHeading.innerText = 'Synthesizing voice...';
-                statusSubtext.innerText = 'Preparing audio';
+                if (voiceOrb) voiceOrb.classList.add('processing');
+                if (nodeTTS) nodeTTS.classList.add('active-tts');
+                if (statusHeading) statusHeading.innerText = 'Synthesizing voice...';
+                if (statusSubtext) statusSubtext.innerText = 'Preparing audio';
                 break;
 
             case 'SPEAKING':
+                clearInactivityTimer();
                 isSpeaking = true;
-                voiceOrb.classList.add('speaking');
-                statusHeading.innerText = 'Speaking...';
-                statusSubtext.innerText = isLiveCallActive ? 'Listening will resume automatically' : 'Playing audio';
+                if (voiceOrb) voiceOrb.classList.add('speaking');
+                if (statusHeading) statusHeading.innerText = 'Speaking...';
+                if (statusSubtext) statusSubtext.innerText = isLiveCallActive ? 'Listening will resume automatically' : 'Playing audio';
                 break;
 
             case 'ERROR':
+                clearInactivityTimer();
                 isRecording = false;
                 isProcessing = false;
                 isSpeaking = false;
-                statusHeading.innerText = 'Error';
-                statusSubtext.innerText = message || 'Click orb to try again';
+                if (statusHeading) statusHeading.innerText = 'Error';
+                if (statusSubtext) statusSubtext.innerText = message || 'Click orb to try again';
                 if (isLiveCallActive) {
                     setTimeout(() => setState('IDLE'), 2000);
                 }
@@ -475,10 +511,10 @@ document.addEventListener('DOMContentLoaded', () => {
         isProcessing = false;
 
         if (data.metrics) {
-            metricSTT.innerText = `${data.metrics.stt_time_ms} ms`;
-            metricLLM.innerText = `${data.metrics.llm_time_ms} ms`;
-            metricTTS.innerText = `${data.metrics.tts_time_ms} ms`;
-            metricTotal.innerText = `${data.metrics.total_time_ms} ms`;
+            if (metricSTT) metricSTT.innerText = `${data.metrics.stt_time_ms} ms`;
+            if (metricLLM) metricLLM.innerText = `${data.metrics.llm_time_ms} ms`;
+            if (metricTTS) metricTTS.innerText = `${data.metrics.tts_time_ms} ms`;
+            if (metricTotal) metricTotal.innerText = `${data.metrics.total_time_ms} ms`;
         }
 
         if (appendUser && data.user_text) {
@@ -499,8 +535,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function playAudioResponse(audioUrl) {
+        clearInactivityTimer();
         if (currentAudio) {
             currentAudio.pause();
+            currentAudio = null;
         }
 
         currentAudio = new Audio(audioUrl);
@@ -511,30 +549,40 @@ document.addEventListener('DOMContentLoaded', () => {
             recorder.setMuted(true);
         }
 
-        currentAudio.onended = () => {
-            currentAudio = null;
-            // Unmute mic and automatically return to listening!
+        let isListeningRestored = false;
+        const restoreListening = () => {
+            if (isListeningRestored) return;
+            isListeningRestored = true;
             if (isLiveCallActive) {
                 recorder.setMuted(false);
+                startInactivityTimer();
             }
             setState('IDLE');
         };
 
+        // Instant pre-arm 100ms before audio completes for zero delay
+        currentAudio.ontimeupdate = () => {
+            if (!currentAudio) return;
+            if (currentAudio.duration && (currentAudio.duration - currentAudio.currentTime <= 0.12)) {
+                restoreListening();
+            }
+        };
+
+        currentAudio.onended = () => {
+            currentAudio = null;
+            restoreListening();
+        };
+
         currentAudio.onerror = () => {
             currentAudio = null;
-            if (isLiveCallActive) {
-                recorder.setMuted(false);
-            }
-            setState('IDLE');
+            restoreListening();
             showToast('Error playing audio stream', 'error');
         };
 
         currentAudio.play().catch(e => {
             console.warn('Auto-play blocked or failed:', e);
-            if (isLiveCallActive) {
-                recorder.setMuted(false);
-            }
-            setState('IDLE');
+            currentAudio = null;
+            restoreListening();
         });
     }
 
@@ -619,49 +667,36 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----------------------------------------------------
     // User Interactions & Modes
     // ----------------------------------------------------
-    modeLive.addEventListener('click', () => {
-        interactionMode = 'live';
-        modeLive.classList.add('active');
-        modeClick.classList.remove('active');
-        modeHold.classList.remove('active');
-        startLiveCall();
-    });
+    if (modeLive) {
+        modeLive.addEventListener('click', () => {
+            interactionMode = 'live';
+            modeLive.classList.add('active');
+            if (modeClick) modeClick.classList.remove('active');
+            startLiveCall();
+        });
+    }
 
-    modeClick.addEventListener('click', () => {
-        if (isLiveCallActive) endLiveCall();
-        interactionMode = 'click';
-        modeClick.classList.add('active');
-        modeLive.classList.remove('active');
-        modeHold.classList.remove('active');
-        setState('IDLE');
-    });
-
-    modeHold.addEventListener('click', () => {
-        if (isLiveCallActive) endLiveCall();
-        interactionMode = 'hold';
-        modeHold.classList.add('active');
-        modeLive.classList.remove('active');
-        modeClick.classList.remove('active');
-        setState('IDLE');
-    });
-
-    voiceOrb.addEventListener('click', () => {
-        if (interactionMode === 'live') {
+    if (modeClick) {
+        modeClick.addEventListener('click', () => {
             if (isLiveCallActive) endLiveCall();
-            else startLiveCall();
-        } else if (interactionMode === 'click') {
-            if (recorder.isRecording) stopManualRecording();
-            else startManualRecording();
-        }
-    });
+            interactionMode = 'click';
+            modeClick.classList.add('active');
+            if (modeLive) modeLive.classList.remove('active');
+            setState('IDLE');
+        });
+    }
 
-    voiceOrb.addEventListener('mousedown', () => {
-        if (interactionMode === 'hold') startManualRecording();
-    });
-
-    window.addEventListener('mouseup', () => {
-        if (interactionMode === 'hold' && recorder.isRecording) stopManualRecording();
-    });
+    if (voiceOrb) {
+        voiceOrb.addEventListener('click', () => {
+            if (interactionMode === 'live') {
+                if (isLiveCallActive) endLiveCall();
+                else startLiveCall();
+            } else if (interactionMode === 'click') {
+                if (recorder.isRecording) stopManualRecording();
+                else startManualRecording();
+            }
+        });
+    }
 
     // Spacebar shortcut
     window.addEventListener('keydown', (e) => {
@@ -670,19 +705,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (interactionMode === 'live') {
                 if (isLiveCallActive) endLiveCall();
                 else startLiveCall();
-            } else if (interactionMode === 'hold') {
-                if (!recorder.isRecording) startManualRecording();
             } else {
                 if (recorder.isRecording) stopManualRecording();
                 else startManualRecording();
             }
-        }
-    });
-
-    window.addEventListener('keyup', (e) => {
-        if (e.code === 'Space' && interactionMode === 'hold' && recorder.isRecording && document.activeElement.tagName !== 'INPUT') {
-            e.preventDefault();
-            stopManualRecording();
         }
     });
 
