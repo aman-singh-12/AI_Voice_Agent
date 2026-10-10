@@ -170,6 +170,9 @@ class AudioRecorder {
 
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         this.audioContext = new AudioContextClass();
+        if (this.audioContext.state === 'suspended') {
+            await this.audioContext.resume();
+        }
         this.source = this.audioContext.createMediaStreamSource(this.mediaStream);
 
         this.analyser = this.audioContext.createAnalyser();
