@@ -87,12 +87,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btnModeLocal) btnModeLocal.classList.add('active');
             if (btnModeCloud) btnModeCloud.classList.remove('active');
             if (btnModeOpenAI) btnModeOpenAI.classList.remove('active');
-            badgePipeline.innerText = 'Local Ollama (Qwen 2.5)';
+            badgePipeline.innerText = 'Local Ollama';
             textLLM.innerText = 'Local Ollama (Qwen 2.5)';
-            textTTS.innerText = 'Local Neural Voice';
+            textTTS.innerText = 'Neural Voice';
             metricLLMSub.innerText = 'Local Ollama';
             metricTTSSub.innerText = 'Local TTS';
-            connectionStatus.innerHTML = '● <span style="color: var(--accent-emerald);">Port 8001 Local Active (0 Keys Required)</span>';
+            connectionStatus.innerHTML = '● <span style="color: var(--accent-emerald-dark);">Active (Local)</span>';
             if (selectPipelineMode) selectPipelineMode.value = 'local';
             if (localSettingsSection) localSettingsSection.style.display = 'block';
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
@@ -101,12 +101,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btnModeOpenAI) btnModeOpenAI.classList.add('active');
             if (btnModeCloud) btnModeCloud.classList.remove('active');
             if (btnModeLocal) btnModeLocal.classList.remove('active');
-            badgePipeline.innerText = 'OpenAI Responses API';
+            badgePipeline.innerText = 'OpenAI API';
             textLLM.innerText = 'OpenAI Responses API';
-            textTTS.innerText = 'Selected TTS Provider';
+            textTTS.innerText = 'Neural Voice';
             metricLLMSub.innerText = 'OpenAI';
             metricTTSSub.innerText = 'Selected TTS';
-            connectionStatus.innerHTML = '✨ <span style="color: var(--accent-cyan);">OpenAI Mode Active (Port 8001)</span>';
+            connectionStatus.innerHTML = '● <span style="color: var(--accent-blue);">Active (OpenAI)</span>';
             if (selectPipelineMode) selectPipelineMode.value = 'openai';
             if (localSettingsSection) localSettingsSection.style.display = 'none';
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
@@ -115,12 +115,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btnModeCloud) btnModeCloud.classList.add('active');
             if (btnModeLocal) btnModeLocal.classList.remove('active');
             if (btnModeOpenAI) btnModeOpenAI.classList.remove('active');
-            badgePipeline.innerText = 'Cloud (Groq + 11Labs)';
-            textLLM.innerText = 'Groq (LPU Inference)';
-            textTTS.innerText = 'ElevenLabs REST API';
+            badgePipeline.innerText = 'Groq Cloud';
+            textLLM.innerText = 'Groq (LPU)';
+            textTTS.innerText = 'ElevenLabs';
             metricLLMSub.innerText = 'Groq LPU';
             metricTTSSub.innerText = 'ElevenLabs';
-            connectionStatus.innerHTML = '☁️ <span style="color: var(--accent-cyan);">Cloud Mode Active (Port 8001)</span>';
+            connectionStatus.innerHTML = '● <span style="color: var(--accent-cyan);">Active (Cloud)</span>';
             if (selectPipelineMode) selectPipelineMode.value = 'cloud';
             if (localSettingsSection) localSettingsSection.style.display = 'none';
             if (cloudSettingsSection) cloudSettingsSection.style.display = 'block';
@@ -168,8 +168,8 @@ document.addEventListener('DOMContentLoaded', () => {
     recorder.onSpeechStart = () => {
         if (isLiveCallActive && !isProcessing && !isSpeaking) {
             voiceOrb.className = 'voice-orb recording';
-            statusHeading.innerText = '🎙️ Listening to your question...';
-            statusSubtext.innerText = 'Take your time. You can pause or use filler words while thinking.';
+            statusHeading.innerText = 'Listening...';
+            statusSubtext.innerText = 'Speak naturally, pause when done';
         }
     };
 
@@ -208,8 +208,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 barHeight = (dataArray[i] / 255) * visualizerCanvas.height;
 
                 const gradient = canvasCtx.createLinearGradient(0, visualizerCanvas.height, 0, 0);
-                gradient.addColorStop(0, '#06b6d4');
-                gradient.addColorStop(1, '#8b5cf6');
+                gradient.addColorStop(0, '#10b981');
+                gradient.addColorStop(1, '#6ee7b7');
 
                 canvasCtx.fillStyle = gradient;
                 canvasCtx.fillRect(x, visualizerCanvas.height - barHeight, barWidth, barHeight);
@@ -245,13 +245,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 isSpeaking = false;
                 if (isLiveCallActive) {
                     voiceOrb.classList.add('speaking');
-                    const silenceSec = ((recorder.silenceDurationMs || 1600) / 1000).toFixed(1);
-                    statusHeading.innerText = '🟢 In Call (Listening...)';
-                    statusSubtext.innerText = `Speak anytime. AI answers after a full ${silenceSec}s pause.`;
+                    statusHeading.innerText = 'In Call (Listening)';
+                    statusSubtext.innerText = 'Speak anytime. AI will reply when you pause.';
                     recorder.setMuted(false);
                 } else {
-                    statusHeading.innerText = 'Hands-Free Live Call Ready';
-                    statusSubtext.innerText = 'Click "Start Live Call" or click the orb to talk';
+                    statusHeading.innerText = 'Ready to talk';
+                    statusSubtext.innerText = 'Click "Start Voice Call" or tap the orb';
                     stopVisualizer();
                 }
                 break;
@@ -260,7 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 isRecording = true;
                 voiceOrb.classList.add('recording');
                 statusHeading.innerText = 'Listening...';
-                statusSubtext.innerText = interactionMode === 'hold' ? 'Release when done' : 'Click again when finished';
+                statusSubtext.innerText = interactionMode === 'hold' ? 'Release when done' : 'Click when finished';
                 startVisualizer();
                 break;
 
@@ -268,38 +267,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 isProcessing = true;
                 voiceOrb.classList.add('processing');
                 nodeSTT.classList.add('active');
-                statusHeading.innerText = '1/3 Transcribing Speech...';
-                statusSubtext.innerText = 'SpeechRecognition converting audio to text';
+                statusHeading.innerText = 'Transcribing...';
+                statusSubtext.innerText = 'Processing speech input';
                 break;
 
             case 'LLM':
                 isProcessing = true;
                 voiceOrb.classList.add('processing');
                 nodeLLM.classList.add('active-llm');
-                statusHeading.innerText = currentMode === 'local' ? '2/3 Generating (Local Qwen)...' : '2/3 Generating (Groq)...';
-                statusSubtext.innerText = currentMode === 'local' ? 'Local Ollama Qwen 2.5 reasoning response' : 'Groq LPU reasoning response';
+                statusHeading.innerText = 'Thinking...';
+                statusSubtext.innerText = 'Generating response';
                 break;
 
             case 'TTS':
                 isProcessing = true;
                 voiceOrb.classList.add('processing');
                 nodeTTS.classList.add('active-tts');
-                statusHeading.innerText = '3/3 Synthesizing Voice...';
-                statusSubtext.innerText = currentMode === 'local' ? 'Local Neural Voice synthesis' : 'ElevenLabs streaming audio';
+                statusHeading.innerText = 'Synthesizing voice...';
+                statusSubtext.innerText = 'Preparing audio';
                 break;
 
             case 'SPEAKING':
                 isSpeaking = true;
                 voiceOrb.classList.add('speaking');
-                statusHeading.innerText = '🔊 Assistant is speaking...';
-                statusSubtext.innerText = isLiveCallActive ? 'Microphone will auto-resume listening when done' : 'Playing response';
+                statusHeading.innerText = 'Speaking...';
+                statusSubtext.innerText = isLiveCallActive ? 'Listening will resume automatically' : 'Playing audio';
                 break;
 
             case 'ERROR':
                 isRecording = false;
                 isProcessing = false;
                 isSpeaking = false;
-                statusHeading.innerText = 'Error Encountered';
+                statusHeading.innerText = 'Error';
                 statusSubtext.innerText = message || 'Click orb to try again';
                 if (isLiveCallActive) {
                     setTimeout(() => setState('IDLE'), 2000);
@@ -316,15 +315,15 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             await recorder.start(true); // Start in Live VAD mode
             isLiveCallActive = true;
-            btnLiveCall.style.background = 'linear-gradient(135deg, #ef4444, #b91c1c)';
-            btnLiveCall.style.boxShadow = '0 0 25px rgba(239, 68, 68, 0.5)';
+            btnLiveCall.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
+            btnLiveCall.style.boxShadow = '0 4px 14px rgba(239, 68, 68, 0.35)';
             btnLiveCall.innerHTML = `
-                <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></svg>
-                <span>End Live Call</span>
+                <svg width="17" height="17" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></svg>
+                <span>End Voice Call</span>
             `;
             startVisualizer();
             setState('IDLE');
-            showToast('Live Call Started! Just speak naturally.', 'success');
+            showToast('Voice call started', 'success');
         } catch (err) {
             showToast('Microphone error: ' + err.message, 'error');
             isLiveCallActive = false;
@@ -340,13 +339,13 @@ document.addEventListener('DOMContentLoaded', () => {
             currentAudio = null;
         }
         btnLiveCall.style.background = 'linear-gradient(135deg, #10b981, #059669)';
-        btnLiveCall.style.boxShadow = '0 0 25px rgba(16, 185, 129, 0.4)';
+        btnLiveCall.style.boxShadow = '0 4px 14px rgba(16, 185, 129, 0.35)';
         btnLiveCall.innerHTML = `
-            <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/></svg>
-            <span>Start Live Call (Hands-Free)</span>
+            <svg width="17" height="17" fill="currentColor" viewBox="0 0 24 24"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/></svg>
+            <span>Start Voice Call</span>
         `;
         setState('IDLE');
-        showToast('Live Call Ended.', 'info');
+        showToast('Voice call ended', 'info');
     }
 
     btnLiveCall.addEventListener('click', () => {

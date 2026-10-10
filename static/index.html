@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice AI Agent Pipeline (Port 8001 - Live Call Mode)</title>
+    <title>Voice AI Agent</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -20,8 +20,8 @@
                 </svg>
             </div>
             <div>
-                <span class="logo-title">Voice AI Pipeline</span>
-                <span class="badge-scratch" id="badgePipeline">Local Ollama (Qwen)</span>
+                <span class="logo-title">Voice AI Agent</span>
+                <span class="badge-scratch" id="badgePipeline">Local Ollama</span>
             </div>
         </div>
         <div class="header-actions">
@@ -29,15 +29,15 @@
             <div class="mode-toggle" style="margin: 0;">
                 <button class="mode-btn active" id="btnModeLocal">💻 Local</button>
                 <button class="mode-btn" id="btnModeOpenAI">✨ OpenAI</button>
-                <button class="mode-btn" id="btnModeCloud">☁️ Groq Cloud</button>
+                <button class="mode-btn" id="btnModeCloud">☁️ Cloud</button>
             </div>
 
             <button class="btn-icon" id="btnClearChat" title="Clear Conversation">
-                <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                <svg width="15" height="15" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                 Clear
             </button>
-            <button class="btn-icon" id="btnSettings" title="Pipeline Settings">
-                <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+            <button class="btn-icon" id="btnSettings" title="Settings">
+                <svg width="15" height="15" fill="currentColor" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
                 Settings
             </button>
         </div>
@@ -49,7 +49,7 @@
             <div class="pipeline-nodes">
                 <div class="node" id="nodeSTT">
                     <div class="node-dot"></div>
-                    <strong>1. STT:</strong> SpeechRecognition
+                    <strong>1. STT:</strong> <span>Voice Input</span>
                 </div>
                 <span class="node-arrow">➔</span>
                 <div class="node" id="nodeLLM">
@@ -59,11 +59,11 @@
                 <span class="node-arrow">➔</span>
                 <div class="node" id="nodeTTS">
                     <div class="node-dot"></div>
-                    <strong id="labelTTS">3. TTS:</strong> <span id="textTTS">Local Neural / ElevenLabs</span>
+                    <strong id="labelTTS">3. TTS:</strong> <span id="textTTS">Neural Voice</span>
                 </div>
             </div>
-            <div id="connectionStatus" style="font-size: 0.8rem; color: var(--accent-emerald);">
-                ● Port 8001 Ready
+            <div id="connectionStatus" style="font-size: 0.8rem; font-weight: 600; color: var(--accent-emerald-dark);">
+                ● Ready
             </div>
         </section>
 
@@ -72,7 +72,7 @@
             <div class="orb-container">
                 <div class="orb-ring orb-ring-1"></div>
                 <div class="orb-ring orb-ring-2"></div>
-                <div class="voice-orb" id="voiceOrb" title="Live Call Voice Agent">
+                <div class="voice-orb" id="voiceOrb" title="Tap to talk">
                     <svg class="orb-mic-icon" viewBox="0 0 24 24">
                         <path fill="currentColor" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/>
                     </svg>
@@ -81,19 +81,19 @@
 
             <canvas class="visualizer-canvas" id="visualizerCanvas"></canvas>
 
-            <div class="stage-status-text" id="statusHeading">Hands-Free Live Call Ready</div>
-            <div class="stage-hint-text" id="statusSubtext">Click "Start Live Call" to begin speaking naturally</div>
+            <div class="stage-status-text" id="statusHeading">Ready to talk</div>
+            <div class="stage-hint-text" id="statusSubtext">Click "Start Voice Call" or tap the orb</div>
 
             <!-- Interaction Mode Toggles -->
-            <div style="display: flex; flex-direction: column; align-items: center; gap: 0.75rem; margin-top: 1.25rem;">
-                <button id="btnLiveCall" style="background: linear-gradient(135deg, #10b981, #059669); border: none; color: white; padding: 0.75rem 1.8rem; border-radius: 9999px; font-weight: 700; font-size: 0.95rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; box-shadow: 0 0 25px rgba(16, 185, 129, 0.4); font-family: inherit; transition: all 0.2s ease;">
-                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/></svg>
-                    <span>Start Live Call (Hands-Free)</span>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 0.6rem; margin-top: 1rem;">
+                <button id="btnLiveCall" style="background: linear-gradient(135deg, #10b981, #059669); border: none; color: white; padding: 0.65rem 1.6rem; border-radius: 9999px; font-weight: 600; font-size: 0.92rem; cursor: pointer; display: flex; align-items: center; gap: 0.45rem; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35); font-family: inherit; transition: all 0.2s ease;">
+                    <svg width="17" height="17" fill="currentColor" viewBox="0 0 24 24"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/></svg>
+                    <span>Start Voice Call</span>
                 </button>
 
                 <div class="mode-toggle">
-                    <button class="mode-btn active" id="modeLive">📞 Live Call (VAD Auto)</button>
-                    <button class="mode-btn" id="modeClick">🖱️ Click to Toggle</button>
+                    <button class="mode-btn active" id="modeLive">📞 Live Call</button>
+                    <button class="mode-btn" id="modeClick">🖱️ Click to Talk</button>
                     <button class="mode-btn" id="modeHold">⌨️ Hold to Talk</button>
                 </div>
             </div>
@@ -103,8 +103,8 @@
         <section class="transcript-panel">
             <div class="panel-header">
                 <div class="panel-title">
-                    <svg width="18" height="18" fill="var(--accent-cyan)" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>
-                    Live Conversation Stream
+                    <svg width="17" height="17" fill="var(--accent-emerald-dark)" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>
+                    Conversation
                 </div>
                 <span id="messageCount" style="font-size: 0.8rem; color: var(--text-muted);">0 turns</span>
             </div>
@@ -112,17 +112,17 @@
             <div class="chat-history-container" id="chatHistory">
                 <div class="empty-state" id="emptyState">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                    <p>No messages yet.</p>
-                    <p style="font-size: 0.8rem;">Click <strong>"Start Live Call"</strong> to talk freely. The AI auto-detects when you stop speaking (1s silence) and speaks back!</p>
+                    <p style="font-weight: 500;">No messages yet.</p>
+                    <p style="font-size: 0.82rem;">Start a voice call or type below to talk with AI.</p>
                 </div>
             </div>
 
             <!-- Fallback text input bar -->
             <form class="chat-input-bar" id="chatForm">
-                <input type="text" id="textInput" placeholder="Or type a message to test LLM + Voice...">
+                <input type="text" id="textInput" placeholder="Type a message...">
                 <button type="submit">
                     <span>Send</span>
-                    <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                    <svg width="13" height="13" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                 </button>
             </form>
         </section>
@@ -130,22 +130,22 @@
         <!-- Pipeline Latency Metrics Row -->
         <section class="metrics-row">
             <div class="metric-card">
-                <span class="metric-label">STT Latency</span>
+                <span class="metric-label">STT</span>
                 <span class="metric-value" id="metricSTT">0 ms</span>
-                <span class="metric-sub">SpeechRecognition</span>
+                <span class="metric-sub">Speech Recognition</span>
             </div>
             <div class="metric-card">
-                <span class="metric-label">LLM Latency</span>
+                <span class="metric-label">LLM</span>
                 <span class="metric-value" id="metricLLM">0 ms</span>
                 <span class="metric-sub" id="metricLLMSub">Local Qwen 2.5</span>
             </div>
             <div class="metric-card">
-                <span class="metric-label">TTS Latency</span>
+                <span class="metric-label">TTS</span>
                 <span class="metric-value" id="metricTTS">0 ms</span>
                 <span class="metric-sub" id="metricTTSSub">Neural Voice</span>
             </div>
             <div class="metric-card">
-                <span class="metric-label">Total Roundtrip</span>
+                <span class="metric-label">Total</span>
                 <span class="metric-value" id="metricTotal">0 ms</span>
                 <span class="metric-sub">Voice to Voice</span>
             </div>
@@ -156,39 +156,38 @@
     <div class="modal-overlay" id="settingsModal">
         <div class="modal-card">
             <div class="modal-header">
-                <div class="modal-title">Pipeline Configuration</div>
+                <div class="modal-title">Settings</div>
                 <button class="modal-close" id="btnCloseModal">&times;</button>
             </div>
 
             <form id="settingsForm">
                 <div class="form-group">
-                    <label for="selectPipelineMode">Execution Mode</label>
+                    <label for="selectPipelineMode">Mode</label>
                     <select id="selectPipelineMode">
-                        <option value="local">💻 100% Local (Ollama + Qwen 2.5 + Free Neural TTS - No Keys Needed)</option>
-                        <option value="cloud">☁️ Cloud Mode (Groq LPU + ElevenLabs API)</option>
-                        <option value="openai">✨ OpenAI Responses API + Existing TTS</option>
+                        <option value="local">💻 Local (Ollama + Qwen 2.5 + Neural Voice)</option>
+                        <option value="cloud">☁️ Cloud (Groq + ElevenLabs)</option>
+                        <option value="openai">✨ OpenAI API</option>
                     </select>
                 </div>
 
                 <!-- Local Mode Settings -->
                 <div id="localSettingsSection">
                     <div class="form-group">
-                        <label for="selectOllamaModel">Local Ollama Model</label>
+                        <label for="selectOllamaModel">Ollama Model</label>
                         <select id="selectOllamaModel">
-                            <option value="qwen2.5:1.5b">qwen2.5:1.5b (Fast & Optimized for 8GB RAM Laptop)</option>
-                            <option value="qwen2.5:3b">qwen2.5:3b (Higher Quality Qwen)</option>
+                            <option value="qwen2.5:1.5b">qwen2.5:1.5b (Fast)</option>
+                            <option value="qwen2.5:3b">qwen2.5:3b (High Quality)</option>
                         </select>
-                        <span class="form-hint">Runs directly on your laptop CPU/RAM via Ollama localhost.</span>
                     </div>
 
                     <div class="form-group">
-                        <label for="selectLocalVoice">Local Voice Preset</label>
+                        <label for="selectLocalVoice">Voice</label>
                         <select id="selectLocalVoice">
-                            <option value="en-US-JennyNeural">Jenny (Natural US Female)</option>
-                            <option value="en-US-GuyNeural">Guy (Natural US Male)</option>
+                            <option value="en-US-JennyNeural">Jenny (US Female)</option>
+                            <option value="en-US-GuyNeural">Guy (US Male)</option>
                             <option value="en-US-AriaNeural">Aria (Expressive Female)</option>
                             <option value="en-GB-SoniaNeural">Sonia (British Female)</option>
-                            <option value="en-IN-NeerjaNeural">Neerja (Indian English Female)</option>
+                            <option value="en-IN-NeerjaNeural">Neerja (Indian Female)</option>
                         </select>
                     </div>
                 </div>
@@ -198,18 +197,12 @@
                     <div class="form-group">
                         <label for="inputGroqKey">Groq API Key</label>
                         <input type="password" id="inputGroqKey" placeholder="gsk_...">
-                        <span class="form-hint">For cloud LPU inference.</span>
                     </div>
 
                     <div id="openaiSettingsSection" style="display: none;">
                         <div class="form-group">
                             <label for="inputOpenAIModel">OpenAI Model</label>
-                            <input type="text" id="inputOpenAIModel" placeholder="Configured in backend .env">
-                            <span class="form-hint">The backend verifies access before sending a request. The API key is never sent to the browser.</span>
-                        </div>
-                        <div class="form-group">
-                            <label>OpenAI API Key</label>
-                            <span class="form-hint">Configure OPENAI_API_KEY in the backend environment; it is intentionally not accepted here.</span>
+                            <input type="text" id="inputOpenAIModel" placeholder="gpt-4o-mini">
                         </div>
                     </div>
 
@@ -219,37 +212,35 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="selectElevenVoice">ElevenLabs Voice ID</label>
+                        <label for="selectElevenVoice">ElevenLabs Voice</label>
                         <select id="selectElevenVoice">
-                            <option value="21m00Tcm4TlvDq8ikWAM">Rachel (Calm Female)</option>
-                            <option value="pNInz6obpgDQGcFmaJgB">Adam (Deep Male)</option>
-                            <option value="EXAVITQu4vr4xnSDxMaL">Bella (Expressive Female)</option>
+                            <option value="21m00Tcm4TlvDq8ikWAM">Rachel (Female)</option>
+                            <option value="pNInz6obpgDQGcFmaJgB">Adam (Male)</option>
+                            <option value="EXAVITQu4vr4xnSDxMaL">Bella (Female)</option>
                         </select>
                     </div>
                 </div>
 
-                <!-- Global VAD & Turn-Taking Settings -->
-                <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-                    <label for="selectSilenceDuration">Turn-Taking Pause Delay (Silence Threshold)</label>
+                <!-- Silence Duration -->
+                <div class="form-group" style="margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+                    <label for="selectSilenceDuration">Pause Detection</label>
                     <select id="selectSilenceDuration">
-                        <option value="800">0.8 Seconds (Ultra-Fast Response)</option>
-                        <option value="1200" selected>1.2 Seconds (Natural Turnaround - Recommended)</option>
-                        <option value="1600">1.6 Seconds (Standard Voice)</option>
-                        <option value="2000">2.0 Seconds (Long Sentences & Thinking Pauses)</option>
-                        <option value="2500">2.5 Seconds (Extended Thinking Time)</option>
+                        <option value="800">0.8s (Fast)</option>
+                        <option value="1200" selected>1.2s (Natural)</option>
+                        <option value="1600">1.6s (Standard)</option>
+                        <option value="2000">2.0s (Relaxed)</option>
                     </select>
-                    <span class="form-hint">How long you can pause or say filler words ("hmm", "like") before AI assumes you're finished.</span>
                 </div>
 
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" id="btnCancelModal">Cancel</button>
-                    <button type="submit" class="btn-primary">Apply Settings</button>
+                    <button type="submit" class="btn-primary">Save Settings</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- Toast Notification Container -->
+    <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
     <script src="/static/audio-recorder.js"></script>
