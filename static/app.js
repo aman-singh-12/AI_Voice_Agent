@@ -11,7 +11,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const modeLive = document.getElementById('modeLive');
     const modeClick = document.getElementById('modeClick');
-    const btnLiveCall = document.getElementById('btnLiveCall');
+    const btnPrimaryAction = document.getElementById('btnPrimaryAction') || document.getElementById('btnLiveCall');
+    const primaryBtnIcon = document.getElementById('primaryBtnIcon');
+    const primaryBtnLabel = document.getElementById('primaryBtnLabel');
+    const btnLiveCall = btnPrimaryAction; // Backward compatibility alias
 
     const nodeSTT = document.getElementById('nodeSTT');
     const nodeLLM = document.getElementById('nodeLLM');
@@ -62,29 +65,53 @@ document.addEventListener('DOMContentLoaded', () => {
     // Toast
     const toastContainer = document.getElementById('toastContainer');
 
-    // App State
+    // ----------------------------------------------------
+    // State Architecture Constants & Single Source of Truth
+    // ----------------------------------------------------
+    const MODE_LIVE_CALL = 'live_call';
+    const MODE_CLICK_TO_TALK = 'click_to_talk';
+
+    const STATE_IDLE = 'idle';
+    const STATE_LIVE_LISTENING = 'live_listening';
+    const STATE_RECORDING = 'recording';
+    const STATE_PROCESSING = 'processing';
+    const STATE_SPEAKING = 'speaking';
+    const STATE_STOPPING = 'stopping';
+    const STATE_ERROR = 'error';
+
+    // Centralized interaction state
+    const sessionState = {
+        mode: MODE_LIVE_CALL,     // 'live_call' | 'click_to_talk'
+        status: STATE_IDLE,       // 'idle' | 'live_listening' | 'recording' | 'processing' | 'speaking' | 'stopping' | 'error'
+        turnId: 0,
+        abortController: null,
+        errorMessage: ''
+    };
+
+    // Shared runtime dependencies
     let currentMode = 'local'; // 'local' | 'cloud' | 'openai'
-    let interactionMode = 'live'; // 'live' | 'click'
-    let isLiveCallActive = false;
-    let isRecording = false;
-    let isProcessing = false;
-    let isSpeaking = false;
     let currentAudio = null;
     let conversationHistory = [];
     const recorder = new AudioRecorder();
 
-    // 5-Second Inactivity / Silence Auto-Off Timer
+    // Legacy sync flags
+    let isLiveCallActive = false;
+    let isRecording = false;
+    let isProcessing = false;
+    let isSpeaking = false;
+
+    // Optional safety timer for prolonged live-call silence
     let liveCallInactivityTimer = null;
-    const INACTIVITY_TIMEOUT_MS = 5000;
+    const INACTIVITY_TIMEOUT_MS = 60000; // 60s idle safety
 
     function startInactivityTimer() {
         clearInactivityTimer();
-        if (!isLiveCallActive) return;
+        if (sessionState.mode !== MODE_LIVE_CALL || sessionState.status === STATE_IDLE) return;
         liveCallInactivityTimer = setTimeout(() => {
-            if (isLiveCallActive && !isProcessing && !isSpeaking && !recorder.hasSpokenInTurn) {
-                console.log('No speech detected for 5s. Auto-ending live call.');
+            if (sessionState.mode === MODE_LIVE_CALL && sessionState.status === STATE_LIVE_LISTENING && !recorder.hasSpokenInTurn) {
+                console.log('Prolonged silence detected. Safely ending live call.');
                 endLiveCall();
-                showToast('Voice call ended (5s silence)', 'info');
+                showToast('Live call ended due to inactivity', 'info');
             }
         }, INACTIVITY_TIMEOUT_MS);
     }
@@ -97,12 +124,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Canvas Visualizer Setup
-    const canvasCtx = visualizerCanvas.getContext('2d');
+    const canvasCtx = visualizerCanvas ? visualizerCanvas.getContext('2d') : null;
     let visualizerAnimationId = null;
 
     checkStatus();
 
-    // Mode Toggle Controls (Local vs OpenAI vs Cloud)
+    // Mode Toggle Controls (Local vs OpenAI vs Cloud pipeline engines)
     function setPipelineMode(mode) {
         currentMode = mode;
         if (mode === 'local') {
@@ -179,7 +206,252 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ----------------------------------------------------
-    // Recorder VAD & Visualizer Callbacks
+    // SVG Icons Map for Primary Action Button
+    // ----------------------------------------------------
+    const ICONS = {
+        call: `<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/></svg>`,
+        endCall: `<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></svg>`,
+        mic: `<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>`,
+        stop: `<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`,
+        spinner: `<svg class="spin-icon" width="18" height="18" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" opacity="0.25"></circle><path fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>`,
+        speaker: `<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>`
+    };
+
+    // ----------------------------------------------------
+    // Centralized UI Update Function
+    // ----------------------------------------------------
+    function updateUI() {
+        const { mode, status, errorMessage } = sessionState;
+
+        // 1. Mode Selector Tabs
+        if (mode === MODE_LIVE_CALL) {
+            if (modeLive) {
+                modeLive.classList.add('active');
+                modeLive.setAttribute('aria-selected', 'true');
+            }
+            if (modeClick) {
+                modeClick.classList.remove('active');
+                modeClick.setAttribute('aria-selected', 'false');
+            }
+        } else {
+            if (modeClick) {
+                modeClick.classList.add('active');
+                modeClick.setAttribute('aria-selected', 'true');
+            }
+            if (modeLive) {
+                modeLive.classList.remove('active');
+                modeLive.setAttribute('aria-selected', 'false');
+            }
+        }
+
+        // 2. Dynamic Primary Action Button
+        let btnLabel = 'Start Live Call';
+        let btnIcon = ICONS.call;
+        let btnClass = 'primary-action-btn btn-state-start';
+        let btnDisabled = false;
+
+        if (mode === MODE_LIVE_CALL) {
+            if (status === STATE_IDLE || status === STATE_ERROR) {
+                btnLabel = 'Start Live Call';
+                btnIcon = ICONS.call;
+                btnClass = 'primary-action-btn btn-state-start';
+                btnDisabled = false;
+            } else if (status === STATE_STOPPING) {
+                btnLabel = 'Ending Call...';
+                btnIcon = ICONS.spinner;
+                btnClass = 'primary-action-btn btn-state-danger';
+                btnDisabled = true;
+            } else {
+                // Active Live Call (listening, recording, processing, speaking)
+                btnLabel = 'End Live Call';
+                btnIcon = ICONS.endCall;
+                btnClass = 'primary-action-btn btn-state-danger';
+                btnDisabled = false;
+            }
+        } else {
+            // Click to Talk Mode
+            if (status === STATE_IDLE || status === STATE_ERROR) {
+                btnLabel = 'Start Talking';
+                btnIcon = ICONS.mic;
+                btnClass = 'primary-action-btn btn-state-start';
+                btnDisabled = false;
+            } else if (status === STATE_RECORDING) {
+                btnLabel = 'Stop Recording';
+                btnIcon = ICONS.stop;
+                btnClass = 'primary-action-btn btn-state-recording';
+                btnDisabled = false;
+            } else if (status === STATE_PROCESSING) {
+                btnLabel = 'Processing...';
+                btnIcon = ICONS.spinner;
+                btnClass = 'primary-action-btn btn-state-processing';
+                btnDisabled = true;
+            } else if (status === STATE_SPEAKING) {
+                btnLabel = 'Playing Response...';
+                btnIcon = ICONS.speaker;
+                btnClass = 'primary-action-btn btn-state-speaking';
+                btnDisabled = true;
+            } else if (status === STATE_STOPPING) {
+                btnLabel = 'Stopping...';
+                btnIcon = ICONS.spinner;
+                btnClass = 'primary-action-btn btn-state-processing';
+                btnDisabled = true;
+            }
+        }
+
+        if (btnPrimaryAction) {
+            btnPrimaryAction.className = btnClass;
+            btnPrimaryAction.disabled = btnDisabled;
+            if (primaryBtnIcon) primaryBtnIcon.innerHTML = '';
+            if (primaryBtnLabel) primaryBtnLabel.innerText = btnLabel;
+            else btnPrimaryAction.innerText = btnLabel;
+        }
+
+        // 3. Central Microphone Orb (Mode-Aware Appearance & Interactivity)
+        if (voiceOrb) {
+            voiceOrb.className = 'voice-orb';
+
+            if (status === STATE_RECORDING || status === STATE_LIVE_LISTENING) {
+                voiceOrb.classList.add('recording');
+            } else if (status === STATE_PROCESSING) {
+                voiceOrb.classList.add('processing');
+            } else if (status === STATE_SPEAKING) {
+                voiceOrb.classList.add('speaking');
+            }
+
+            if (mode === MODE_CLICK_TO_TALK) {
+                if (status === STATE_PROCESSING || status === STATE_SPEAKING || status === STATE_STOPPING) {
+                    voiceOrb.classList.add('disabled', 'non-interactive');
+                    voiceOrb.title = status === STATE_SPEAKING ? 'Playing response...' : 'Processing...';
+                } else if (status === STATE_RECORDING) {
+                    voiceOrb.title = 'Click to stop recording';
+                } else {
+                    voiceOrb.title = 'Click to start recording';
+                }
+            } else {
+                // Live Call
+                if (status === STATE_IDLE || status === STATE_ERROR) {
+                    voiceOrb.title = 'Click to start Live Call';
+                } else {
+                    voiceOrb.title = 'In Call - Click to end';
+                }
+            }
+        }
+
+        // 4. Status Heading & Contextual Subtext
+        if (statusHeading && statusSubtext) {
+            switch (status) {
+                case STATE_IDLE:
+                    statusHeading.innerText = 'Ready to talk';
+                    statusSubtext.innerText = mode === MODE_LIVE_CALL
+                        ? 'Start a hands-free conversation. The assistant listens and responds automatically.'
+                        : 'Press Start Talking or tap the microphone to record your message.';
+                    break;
+
+                case STATE_LIVE_LISTENING:
+                    statusHeading.innerText = "I'm listening...";
+                    statusSubtext.innerText = 'Speak naturally, pause when done (hands-free)';
+                    break;
+
+                case STATE_RECORDING:
+                    statusHeading.innerText = "I'm listening...";
+                    statusSubtext.innerText = mode === MODE_LIVE_CALL
+                        ? 'Speak naturally, pause when done'
+                        : 'Recording... Click Stop or tap orb when finished';
+                    break;
+
+                case STATE_PROCESSING:
+                    statusHeading.innerText = 'Thinking...';
+                    statusSubtext.innerText = 'Processing your speech and generating response';
+                    break;
+
+                case STATE_SPEAKING:
+                    statusHeading.innerText = 'Speaking...';
+                    statusSubtext.innerText = mode === MODE_LIVE_CALL
+                        ? 'Listening will resume automatically'
+                        : 'Playing audio response';
+                    break;
+
+                case STATE_STOPPING:
+                    statusHeading.innerText = 'Ending session...';
+                    statusSubtext.innerText = 'Wrapping up connection';
+                    break;
+
+                case STATE_ERROR:
+                    statusHeading.innerText = 'Error';
+                    statusSubtext.innerText = errorMessage || (mode === MODE_LIVE_CALL ? 'Click Start Live Call to retry' : 'Click Start Talking to retry');
+                    break;
+            }
+        }
+
+        // 5. Node Pipeline Visual Indicators
+        if (nodeSTT) {
+            nodeSTT.className = 'node' + (status === STATE_PROCESSING ? ' active' : '');
+        }
+        if (nodeLLM) {
+            nodeLLM.className = 'node' + (status === STATE_PROCESSING ? ' active-llm' : '');
+        }
+        if (nodeTTS) {
+            nodeTTS.className = 'node' + (status === STATE_SPEAKING ? ' active-tts' : '');
+        }
+
+        // Sync legacy booleans for any dependent references
+        isLiveCallActive = (mode === MODE_LIVE_CALL && status !== STATE_IDLE && status !== STATE_ERROR);
+        isRecording = (status === STATE_RECORDING || status === STATE_LIVE_LISTENING);
+        isProcessing = (status === STATE_PROCESSING);
+        isSpeaking = (status === STATE_SPEAKING);
+    }
+
+    function setSessionStatus(newStatus, errorMsg = '') {
+        sessionState.status = newStatus;
+        sessionState.errorMessage = errorMsg;
+        updateUI();
+    }
+
+    // ----------------------------------------------------
+    // Unified Session Teardown
+    // ----------------------------------------------------
+    async function cleanupActiveSession() {
+        sessionState.turnId++;
+        if (sessionState.abortController) {
+            try { sessionState.abortController.abort(); } catch (e) {}
+            sessionState.abortController = null;
+        }
+
+        clearInactivityTimer();
+        stopVisualizer();
+
+        if (currentAudio) {
+            try {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+            } catch (e) {}
+            currentAudio = null;
+        }
+
+        if (recorder && recorder.isRecording) {
+            try {
+                await recorder.stop();
+            } catch (e) {}
+        }
+    }
+
+    // ----------------------------------------------------
+    // Mode Switching Logic
+    // ----------------------------------------------------
+    async function setSessionMode(newMode) {
+        if (sessionState.mode === newMode) return;
+
+        // Cleanly stop any active recording or playback
+        await cleanupActiveSession();
+
+        sessionState.mode = newMode;
+        setSessionStatus(STATE_IDLE);
+
+        showToast(newMode === MODE_LIVE_CALL ? 'Switched to Live Call mode' : 'Switched to Click to Talk mode', 'info');
+    }
+
+    // ----------------------------------------------------
+    // Audio Recorder Callbacks
     // ----------------------------------------------------
     recorder.onVolumeChange = (vol) => {
         if (!recorder.isRecording || recorder.isMuted) return;
@@ -187,38 +459,38 @@ document.addEventListener('DOMContentLoaded', () => {
             clearInactivityTimer();
         }
         const scale = 1 + vol * 0.3;
-        voiceOrb.style.transform = `scale(${scale})`;
+        if (voiceOrb) {
+            voiceOrb.style.transform = `scale(${scale})`;
+        }
     };
 
     recorder.onSpeechStart = () => {
         clearInactivityTimer();
-        if (isLiveCallActive && !isProcessing && !isSpeaking) {
-            voiceOrb.className = 'voice-orb recording';
-            statusHeading.innerText = 'Listening...';
-            statusSubtext.innerText = 'Speak naturally, pause when done';
+        if (sessionState.mode === MODE_LIVE_CALL && sessionState.status === STATE_LIVE_LISTENING) {
+            setSessionStatus(STATE_RECORDING);
         }
     };
 
-    // Instant zero-delay transcript path (< 50ms)
+    // Instant transcript path (< 50ms) for Live Call
     recorder.onSpeechTranscript = async (text) => {
         clearInactivityTimer();
-        if (isLiveCallActive && !isProcessing && !isSpeaking && text) {
+        if (sessionState.mode === MODE_LIVE_CALL && !isProcessing && !isSpeaking && text) {
             recorder.setMuted(true);
             await processText(text);
         }
     };
 
-    // Audio blob fallback path
+    // Audio blob fallback path for Live Call
     recorder.onSilenceDetected = async (wavBlob) => {
         clearInactivityTimer();
-        if (isLiveCallActive && !isProcessing && !isSpeaking && wavBlob) {
+        if (sessionState.mode === MODE_LIVE_CALL && !isProcessing && !isSpeaking && wavBlob) {
             recorder.setMuted(true);
             await processAudio(wavBlob);
         }
     };
 
     function startVisualizer() {
-        if (!recorder.analyser) return;
+        if (!recorder.analyser || !canvasCtx) return;
         const bufferLength = recorder.analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
 
@@ -253,186 +525,165 @@ document.addEventListener('DOMContentLoaded', () => {
             cancelAnimationFrame(visualizerAnimationId);
             visualizerAnimationId = null;
         }
-        canvasCtx.clearRect(0, 0, visualizerCanvas.width, visualizerCanvas.height);
-        voiceOrb.style.transform = 'scale(1)';
-    }
-
-    // ----------------------------------------------------
-    // State UI Updates
-    // ----------------------------------------------------
-    function setState(state, message = '') {
-        if (voiceOrb) voiceOrb.className = 'voice-orb';
-        if (nodeSTT) nodeSTT.className = 'node';
-        if (nodeLLM) nodeLLM.className = 'node';
-        if (nodeTTS) nodeTTS.className = 'node';
-
-        switch (state) {
-            case 'IDLE':
-                isRecording = false;
-                isProcessing = false;
-                isSpeaking = false;
-                if (isLiveCallActive) {
-                    if (voiceOrb) voiceOrb.classList.add('speaking');
-                    if (statusHeading) statusHeading.innerText = 'In Call (Listening)';
-                    if (statusSubtext) statusSubtext.innerText = 'Speak anytime (auto-ends after 5s silence)';
-                    recorder.setMuted(false);
-                    startInactivityTimer();
-                } else {
-                    clearInactivityTimer();
-                    if (statusHeading) statusHeading.innerText = 'Ready to talk';
-                    if (statusSubtext) statusSubtext.innerText = 'Click "Start Voice Call" or tap the orb';
-                    stopVisualizer();
-                }
-                break;
-
-            case 'RECORDING':
-                clearInactivityTimer();
-                isRecording = true;
-                if (voiceOrb) voiceOrb.classList.add('recording');
-                if (statusHeading) statusHeading.innerText = 'Listening...';
-                if (statusSubtext) statusSubtext.innerText = 'Click when finished';
-                startVisualizer();
-                break;
-
-            case 'STT':
-                clearInactivityTimer();
-                isProcessing = true;
-                if (voiceOrb) voiceOrb.classList.add('processing');
-                if (nodeSTT) nodeSTT.classList.add('active');
-                if (statusHeading) statusHeading.innerText = 'Transcribing...';
-                if (statusSubtext) statusSubtext.innerText = 'Processing speech input';
-                break;
-
-            case 'LLM':
-                clearInactivityTimer();
-                isProcessing = true;
-                if (voiceOrb) voiceOrb.classList.add('processing');
-                if (nodeLLM) nodeLLM.classList.add('active-llm');
-                if (statusHeading) statusHeading.innerText = 'Thinking...';
-                if (statusSubtext) statusSubtext.innerText = 'Generating response';
-                break;
-
-            case 'TTS':
-                clearInactivityTimer();
-                isProcessing = true;
-                if (voiceOrb) voiceOrb.classList.add('processing');
-                if (nodeTTS) nodeTTS.classList.add('active-tts');
-                if (statusHeading) statusHeading.innerText = 'Synthesizing voice...';
-                if (statusSubtext) statusSubtext.innerText = 'Preparing audio';
-                break;
-
-            case 'SPEAKING':
-                clearInactivityTimer();
-                isSpeaking = true;
-                if (voiceOrb) voiceOrb.classList.add('speaking');
-                if (statusHeading) statusHeading.innerText = 'Speaking...';
-                if (statusSubtext) statusSubtext.innerText = isLiveCallActive ? 'Listening will resume automatically' : 'Playing audio';
-                break;
-
-            case 'ERROR':
-                clearInactivityTimer();
-                isRecording = false;
-                isProcessing = false;
-                isSpeaking = false;
-                if (statusHeading) statusHeading.innerText = 'Error';
-                if (statusSubtext) statusSubtext.innerText = message || 'Click orb to try again';
-                if (isLiveCallActive) {
-                    setTimeout(() => setState('IDLE'), 2000);
-                }
-                break;
+        if (canvasCtx && visualizerCanvas) {
+            canvasCtx.clearRect(0, 0, visualizerCanvas.width, visualizerCanvas.height);
+        }
+        if (voiceOrb) {
+            voiceOrb.style.transform = 'scale(1)';
         }
     }
 
     // ----------------------------------------------------
-    // Live Call Mode Control
+    // Shared Recording & Call Lifecycle Operations
     // ----------------------------------------------------
+
+    // --- Live Call ---
     async function startLiveCall() {
-        if (isLiveCallActive) return;
+        if (sessionState.mode !== MODE_LIVE_CALL) return;
+        if (sessionState.status !== STATE_IDLE && sessionState.status !== STATE_ERROR) return;
+
+        if (currentAudio) {
+            try { currentAudio.pause(); } catch (e) {}
+            currentAudio = null;
+        }
+
         try {
-            await recorder.start(true); // Start in Live VAD mode
-            isLiveCallActive = true;
-            btnLiveCall.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
-            btnLiveCall.style.boxShadow = '0 4px 14px rgba(239, 68, 68, 0.35)';
-            btnLiveCall.innerHTML = `
-                <svg width="17" height="17" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></svg>
-                <span>End Voice Call</span>
-            `;
+            await recorder.start(true); // Start continuous Live VAD mode
             startVisualizer();
-            setState('IDLE');
-            showToast('Voice call started', 'success');
+            setSessionStatus(STATE_LIVE_LISTENING);
+            startInactivityTimer();
+            showToast('Live call connected', 'success');
         } catch (err) {
+            console.error('Live call microphone error:', err);
             showToast('Microphone error: ' + err.message, 'error');
-            isLiveCallActive = false;
+            setSessionStatus(STATE_ERROR, err.message);
         }
     }
 
     async function endLiveCall() {
-        if (!isLiveCallActive) return;
-        isLiveCallActive = false;
-        await recorder.stop();
-        if (currentAudio) {
-            currentAudio.pause();
-            currentAudio = null;
-        }
-        btnLiveCall.style.background = 'linear-gradient(135deg, #10b981, #059669)';
-        btnLiveCall.style.boxShadow = '0 4px 14px rgba(16, 185, 129, 0.35)';
-        btnLiveCall.innerHTML = `
-            <svg width="17" height="17" fill="currentColor" viewBox="0 0 24 24"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/></svg>
-            <span>Start Voice Call</span>
-        `;
-        setState('IDLE');
-        showToast('Voice call ended', 'info');
+        if (sessionState.mode !== MODE_LIVE_CALL) return;
+        if (sessionState.status === STATE_IDLE) return;
+
+        setSessionStatus(STATE_STOPPING);
+        await cleanupActiveSession();
+        setSessionStatus(STATE_IDLE);
+        showToast('Live call ended', 'info');
     }
 
-    btnLiveCall.addEventListener('click', () => {
-        if (isLiveCallActive) {
-            endLiveCall();
-        } else {
-            startLiveCall();
-        }
-    });
+    // --- Click to Talk (Unified Single Session) ---
+    async function startClickToTalkRecording() {
+        if (sessionState.mode !== MODE_CLICK_TO_TALK) return;
+        if (sessionState.status !== STATE_IDLE && sessionState.status !== STATE_ERROR) return;
 
-    // ----------------------------------------------------
-    // Manual Recording Flow (Click / Hold)
-    // ----------------------------------------------------
-    async function startManualRecording() {
-        if (isProcessing) return;
         if (currentAudio) {
-            currentAudio.pause();
+            try { currentAudio.pause(); } catch (e) {}
             currentAudio = null;
         }
+
         try {
-            await recorder.start(false);
-            setState('RECORDING');
+            await recorder.start(false); // Manual mode (non-VAD raw capture)
+            setSessionStatus(STATE_RECORDING);
+            startVisualizer();
         } catch (err) {
+            console.error('Click to Talk mic error:', err);
             showToast('Microphone error: ' + err.message, 'error');
-            setState('IDLE');
+            setSessionStatus(STATE_ERROR, err.message);
         }
     }
 
-    async function stopManualRecording() {
-        if (!recorder.isRecording) return;
-        setState('STT');
+    async function stopClickToTalkRecording() {
+        if (sessionState.mode !== MODE_CLICK_TO_TALK) return;
+        if (sessionState.status !== STATE_RECORDING) return;
+
+        setSessionStatus(STATE_PROCESSING);
+        stopVisualizer();
+
         try {
             const wavBlob = await recorder.stop();
-            if (!wavBlob || wavBlob.size < 500) {
-                showToast('Recording was too short.', 'error');
-                setState('IDLE');
+            if (!wavBlob || wavBlob.size < 600) {
+                showToast('Recording was too short. Speak and press stop when done.', 'info');
+                setSessionStatus(STATE_IDLE);
                 return;
             }
             await processAudio(wavBlob);
         } catch (err) {
+            console.error('Recording stop error:', err);
             showToast('Recording failed: ' + err.message, 'error');
-            setState('ERROR', err.message);
+            setSessionStatus(STATE_ERROR, err.message);
         }
     }
 
     // ----------------------------------------------------
-    // API Audio & Text Processing
+    // Unified Action Handlers (Button & Orb Call the Exact Same Functions)
+    // ----------------------------------------------------
+    async function handlePrimaryActionClick() {
+        if (sessionState.mode === MODE_LIVE_CALL) {
+            if (sessionState.status === STATE_IDLE || sessionState.status === STATE_ERROR) {
+                await startLiveCall();
+            } else {
+                await endLiveCall();
+            }
+        } else {
+            // Click to Talk
+            if (sessionState.status === STATE_IDLE || sessionState.status === STATE_ERROR) {
+                await startClickToTalkRecording();
+            } else if (sessionState.status === STATE_RECORDING) {
+                await stopClickToTalkRecording();
+            }
+            // During processing / speaking, clicks are ignored safely
+        }
+    }
+
+    async function handleOrbClick() {
+        if (sessionState.mode === MODE_LIVE_CALL) {
+            if (sessionState.status === STATE_IDLE || sessionState.status === STATE_ERROR) {
+                await startLiveCall();
+            } else {
+                await endLiveCall();
+            }
+        } else {
+            // Click to Talk
+            if (sessionState.status === STATE_IDLE || sessionState.status === STATE_ERROR) {
+                await startClickToTalkRecording();
+            } else if (sessionState.status === STATE_RECORDING) {
+                await stopClickToTalkRecording();
+            }
+            // During processing / speaking, clicks are ignored safely
+        }
+    }
+
+    // Backward-compatible setState wrapper for legacy callers
+    function setState(state, message = '') {
+        switch (state) {
+            case 'IDLE':
+                setSessionStatus(STATE_IDLE);
+                break;
+            case 'RECORDING':
+                setSessionStatus(STATE_RECORDING);
+                break;
+            case 'STT':
+            case 'LLM':
+            case 'TTS':
+                setSessionStatus(STATE_PROCESSING);
+                break;
+            case 'SPEAKING':
+                setSessionStatus(STATE_SPEAKING);
+                break;
+            case 'ERROR':
+                setSessionStatus(STATE_ERROR, message);
+                break;
+        }
+    }
+
+    // ----------------------------------------------------
+    // API Audio & Text Pipeline Processing
     // ----------------------------------------------------
     async function processAudio(wavBlob) {
-        isProcessing = true;
-        setState('STT');
+        const turnId = ++sessionState.turnId;
+        sessionState.abortController = new AbortController();
+
+        setSessionStatus(STATE_PROCESSING);
+        if (nodeSTT) nodeSTT.classList.add('active');
 
         const formData = new FormData();
         formData.append('audio', wavBlob, 'recording.wav');
@@ -444,35 +695,57 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/api/process-audio', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: sessionState.abortController.signal
             });
 
             const data = await response.json();
 
+            // Guard against superseded turns or cancelled operations
+            if (turnId !== sessionState.turnId) return;
+
             if (!response.ok || data.error) {
                 const stage = data.stage ? `[${data.stage}] ` : '';
                 showToast(`${stage}${data.message || 'Error processing audio'}`, 'error');
-                setState('ERROR', data.message);
-                isProcessing = false;
-                if (isLiveCallActive) recorder.setMuted(false);
+                setSessionStatus(STATE_ERROR, data.message);
+                if (sessionState.mode === MODE_LIVE_CALL && recorder.isRecording) {
+                    recorder.setMuted(false);
+                    setTimeout(() => {
+                        if (sessionState.mode === MODE_LIVE_CALL && sessionState.status === STATE_ERROR) {
+                            setSessionStatus(STATE_LIVE_LISTENING);
+                        }
+                    }, 2000);
+                }
                 return;
             }
 
-            handleSuccessResponse(data);
+            handleSuccessResponse(data, true, turnId);
 
         } catch (err) {
+            if (err.name === 'AbortError') return;
+            if (turnId !== sessionState.turnId) return;
+
             showToast('Network / Server Error: ' + err.message, 'error');
-            setState('ERROR', err.message);
-            isProcessing = false;
-            if (isLiveCallActive) recorder.setMuted(false);
+            setSessionStatus(STATE_ERROR, err.message);
+            if (sessionState.mode === MODE_LIVE_CALL && recorder.isRecording) {
+                recorder.setMuted(false);
+                setTimeout(() => {
+                    if (sessionState.mode === MODE_LIVE_CALL && sessionState.status === STATE_ERROR) {
+                        setSessionStatus(STATE_LIVE_LISTENING);
+                    }
+                }, 2000);
+            }
         }
     }
 
     async function processText(text) {
-        if (!text || !text.trim() || isProcessing) return;
+        if (!text || !text.trim()) return;
+        if (sessionState.status === STATE_PROCESSING || sessionState.status === STATE_SPEAKING) return;
 
-        isProcessing = true;
-        setState('LLM');
+        const turnId = ++sessionState.turnId;
+        sessionState.abortController = new AbortController();
+
+        setSessionStatus(STATE_PROCESSING);
         appendUserMessage(text.trim());
 
         const customKeys = getCustomConfig();
@@ -485,30 +758,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     text: text.trim(),
                     conversation_history: conversationHistory,
                     custom_keys: customKeys
-                })
+                }),
+                signal: sessionState.abortController.signal
             });
 
             const data = await response.json();
+            if (turnId !== sessionState.turnId) return;
 
             if (!response.ok || data.error) {
                 const stage = data.stage ? `[${data.stage}] ` : '';
                 showToast(`${stage}${data.message || 'Error processing text'}`, 'error');
-                setState('ERROR', data.message);
-                isProcessing = false;
+                setSessionStatus(STATE_ERROR, data.message);
                 return;
             }
 
-            handleSuccessResponse(data, false);
+            handleSuccessResponse(data, false, turnId);
 
         } catch (err) {
+            if (err.name === 'AbortError') return;
+            if (turnId !== sessionState.turnId) return;
+
             showToast('Network / Server Error: ' + err.message, 'error');
-            setState('ERROR', err.message);
-            isProcessing = false;
+            setSessionStatus(STATE_ERROR, err.message);
         }
     }
 
-    function handleSuccessResponse(data, appendUser = true) {
-        isProcessing = false;
+    function handleSuccessResponse(data, appendUser = true, turnId) {
+        if (turnId && turnId !== sessionState.turnId) return;
 
         if (data.metrics) {
             if (metricSTT) metricSTT.innerText = `${data.metrics.stt_time_ms} ms`;
@@ -528,61 +804,72 @@ document.addEventListener('DOMContentLoaded', () => {
         updateMessageCount();
 
         if (data.audio_url) {
-            playAudioResponse(data.audio_url);
+            playAudioResponse(data.audio_url, turnId);
         } else {
-            setState('IDLE');
+            if (sessionState.mode === MODE_LIVE_CALL) {
+                recorder.setMuted(false);
+                setSessionStatus(STATE_LIVE_LISTENING);
+            } else {
+                setSessionStatus(STATE_IDLE);
+            }
         }
     }
 
-    function playAudioResponse(audioUrl) {
+    function playAudioResponse(audioUrl, turnId) {
         clearInactivityTimer();
         if (currentAudio) {
-            currentAudio.pause();
+            try {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+            } catch (e) {}
             currentAudio = null;
         }
 
         currentAudio = new Audio(audioUrl);
-        setState('SPEAKING');
+        setSessionStatus(STATE_SPEAKING);
 
-        // Mute mic while speaking
-        if (isLiveCallActive) {
+        // Mute mic while assistant speaks
+        if (sessionState.mode === MODE_LIVE_CALL) {
             recorder.setMuted(true);
         }
 
-        let isListeningRestored = false;
-        const restoreListening = () => {
-            if (isListeningRestored) return;
-            isListeningRestored = true;
-            if (isLiveCallActive) {
+        let isPlaybackFinished = false;
+        const restoreAfterPlayback = () => {
+            if (isPlaybackFinished) return;
+            isPlaybackFinished = true;
+            currentAudio = null;
+
+            if (turnId && turnId !== sessionState.turnId) return;
+
+            if (sessionState.mode === MODE_LIVE_CALL) {
                 recorder.setMuted(false);
                 startInactivityTimer();
+                setSessionStatus(STATE_LIVE_LISTENING);
+            } else {
+                setSessionStatus(STATE_IDLE);
             }
-            setState('IDLE');
         };
 
-        // Instant pre-arm 100ms before audio completes for zero delay
+        // Instant pre-arm 100ms before audio completes for zero delay in live call
         currentAudio.ontimeupdate = () => {
             if (!currentAudio) return;
             if (currentAudio.duration && (currentAudio.duration - currentAudio.currentTime <= 0.12)) {
-                restoreListening();
+                restoreAfterPlayback();
             }
         };
 
         currentAudio.onended = () => {
-            currentAudio = null;
-            restoreListening();
+            restoreAfterPlayback();
         };
 
         currentAudio.onerror = () => {
-            currentAudio = null;
-            restoreListening();
+            restoreAfterPlayback();
             showToast('Error playing audio stream', 'error');
         };
 
         currentAudio.play().catch(e => {
             console.warn('Auto-play blocked or failed:', e);
-            currentAudio = null;
-            restoreListening();
+            restoreAfterPlayback();
         });
     }
 
@@ -640,12 +927,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.playSnippet = (url) => {
-        playAudioResponse(url);
+        playAudioResponse(url, ++sessionState.turnId);
     };
 
     function updateMessageCount() {
         const turns = Math.floor(conversationHistory.length / 2);
-        messageCountEl.innerText = `${turns} turn${turns === 1 ? '' : 's'}`;
+        if (messageCountEl) {
+            messageCountEl.innerText = `${turns} turn${turns === 1 ? '' : 's'}`;
+        }
     }
 
     function clearChat() {
@@ -660,40 +949,47 @@ document.addEventListener('DOMContentLoaded', () => {
             currentAudio.pause();
             currentAudio = null;
         }
-        setState('IDLE');
+        setSessionStatus(STATE_IDLE);
         showToast('Conversation cleared.', 'success');
     }
 
     // ----------------------------------------------------
-    // User Interactions & Modes
+    // User Interactions & Event Listeners
     // ----------------------------------------------------
+
+    // Mode selectors
     if (modeLive) {
         modeLive.addEventListener('click', () => {
-            interactionMode = 'live';
-            modeLive.classList.add('active');
-            if (modeClick) modeClick.classList.remove('active');
-            startLiveCall();
+            setSessionMode(MODE_LIVE_CALL);
         });
     }
 
     if (modeClick) {
         modeClick.addEventListener('click', () => {
-            if (isLiveCallActive) endLiveCall();
-            interactionMode = 'click';
-            modeClick.classList.add('active');
-            if (modeLive) modeLive.classList.remove('active');
-            setState('IDLE');
+            setSessionMode(MODE_CLICK_TO_TALK);
         });
     }
 
+    // Primary Action Button (State-Aware)
+    if (btnPrimaryAction) {
+        btnPrimaryAction.addEventListener('click', (e) => {
+            e.preventDefault();
+            handlePrimaryActionClick();
+        });
+    }
+
+    // Central Microphone Orb (Mode-Aware)
     if (voiceOrb) {
-        voiceOrb.addEventListener('click', () => {
-            if (interactionMode === 'live') {
-                if (isLiveCallActive) endLiveCall();
-                else startLiveCall();
-            } else if (interactionMode === 'click') {
-                if (recorder.isRecording) stopManualRecording();
-                else startManualRecording();
+        voiceOrb.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleOrbClick();
+        });
+
+        // Keyboard accessibility for Orb
+        voiceOrb.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleOrbClick();
             }
         });
     }
@@ -702,26 +998,28 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('keydown', (e) => {
         if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
             e.preventDefault();
-            if (interactionMode === 'live') {
-                if (isLiveCallActive) endLiveCall();
-                else startLiveCall();
-            } else {
-                if (recorder.isRecording) stopManualRecording();
-                else startManualRecording();
+            handlePrimaryActionClick();
+        }
+    });
+
+    // Chat input bar
+    if (chatForm) {
+        chatForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const text = textInput ? textInput.value : '';
+            if (text) {
+                textInput.value = '';
+                processText(text);
             }
-        }
-    });
+        });
+    }
 
-    chatForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const text = textInput.value;
-        if (text) {
-            textInput.value = '';
-            processText(text);
-        }
-    });
+    if (btnClearChat) {
+        btnClearChat.addEventListener('click', clearChat);
+    }
 
-    btnClearChat.addEventListener('click', clearChat);
+    // Initialize UI on load
+    updateUI();
 
     // ----------------------------------------------------
     // Settings Modal
