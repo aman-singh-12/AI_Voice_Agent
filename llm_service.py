@@ -87,12 +87,12 @@ class GroqProvider(BaseLLMProvider):
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 150):
         key = api_key if api_key is not None else os.getenv("GROQ_API_KEY", "")
-        # If model is explicitly passed, use it; otherwise read env with safe fallback
-        if model:
+        # Strictly sanitize model to eliminate deprecated llama models
+        if model and "llama" not in model.lower():
             selected_model = model
         else:
             env_model = os.getenv("GROQ_MODEL", "").strip()
-            selected_model = env_model if env_model else "qwen/qwen3.8-27b"
+            selected_model = env_model if (env_model and "llama" not in env_model.lower()) else "qwen/qwen3.8-27b"
         super().__init__(name="groq", api_key=key, model=selected_model, temperature=temperature, max_tokens=max_tokens)
 
     def _get_client(self):

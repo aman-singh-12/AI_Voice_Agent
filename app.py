@@ -186,6 +186,8 @@ async def save_keys(req: SaveKeysRequest):
         set_key(env_file, "GROQ_API_KEY", k)
     if req.groq_model and req.groq_model.strip():
         m = req.groq_model.strip()
+        if "llama" in m.lower():
+            m = "qwen/qwen3.8-27b"
         os.environ["GROQ_MODEL"] = m
         pipeline.llm_manager.configure_provider("groq", model=m)
         set_key(env_file, "GROQ_MODEL", m)

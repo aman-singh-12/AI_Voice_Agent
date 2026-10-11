@@ -1233,14 +1233,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function populateSelectOptions(selectEl, models, currentModel) {
         if (!selectEl || !models || models.length === 0) return;
-        const previousVal = currentModel || selectEl.value;
-        const exists = models.includes(previousVal);
+        // Strictly filter out any deprecated llama models
+        let filteredModels = models.filter(m => !m.toLowerCase().includes('llama'));
+        if (filteredModels.length === 0) {
+            filteredModels = models;
+        }
+
+        let previousVal = currentModel || selectEl.value;
+        if (previousVal && previousVal.toLowerCase().includes('llama')) {
+            previousVal = filteredModels[0];
+        }
+
+        const exists = filteredModels.includes(previousVal);
         let html = '';
-        if (previousVal && !exists) {
+        if (previousVal && !exists && !previousVal.toLowerCase().includes('llama')) {
             html += `<option value="${escapeHtml(previousVal)}" selected>${escapeHtml(previousVal)} (active)</option>`;
         }
-        html += models.map(m => `<option value="${escapeHtml(m)}" ${m === previousVal ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
+        html += filteredModels.map(m => `<option value="${escapeHtml(m)}" ${m === previousVal ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
         selectEl.innerHTML = html;
+        if (filteredModels.length > 0 && (!previousVal || previousVal.toLowerCase().includes('llama') || !exists)) {
+            selectEl.value = filteredModels[0];
+        }
     }
 
     function updateBadge(badgeEl, info) {
