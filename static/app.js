@@ -80,7 +80,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectElevenVoice = document.getElementById('selectElevenVoice');
     const selectLocalVoice = document.getElementById('selectLocalVoice');
     const selectSilenceDuration = document.getElementById('selectSilenceDuration');
-    const selectMemoryMode = document.getElementById('selectMemoryMode');
 
     // Toast
     const toastContainer = document.getElementById('toastContainer');
@@ -230,18 +229,6 @@ document.addEventListener('DOMContentLoaded', () => {
             recorder.setSilenceDuration(ms);
             localStorage.setItem('voice_silence_ms', ms);
             showToast(`Pause delay set to ${(ms/1000).toFixed(1)}s`, 'info');
-        });
-    }
-
-    // Conversation Memory mode listener (Atomic / Single-turn vs Multi-turn)
-    if (selectMemoryMode) {
-        const savedMemory = localStorage.getItem('voice_memory_mode') || 'atomic';
-        selectMemoryMode.value = savedMemory;
-        selectMemoryMode.addEventListener('change', (e) => {
-            const mode = e.target.value;
-            localStorage.setItem('voice_memory_mode', mode);
-            updateMessageCount();
-            showToast(`Conversation memory: ${mode === 'atomic' ? 'Atomic (Single Turn)' : 'Multi-Turn'}`, 'info');
         });
     }
 
@@ -726,12 +713,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (nodeSTT) nodeSTT.classList.add('active');
 
         const customKeys = getCustomConfig();
-        const memoryMode = localStorage.getItem('voice_memory_mode') || 'atomic';
-        const historyToSend = (memoryMode === 'atomic') ? [] : conversationHistory;
 
         const formData = new FormData();
         formData.append('audio', wavBlob, 'recording.wav');
-        formData.append('history', JSON.stringify(historyToSend));
+        formData.append('history', JSON.stringify([])); // Always atomic: single turn context
         formData.append('keys', JSON.stringify(customKeys));
 
         try {
@@ -791,8 +776,6 @@ document.addEventListener('DOMContentLoaded', () => {
         appendUserMessage(text.trim());
 
         const customKeys = getCustomConfig();
-        const memoryMode = localStorage.getItem('voice_memory_mode') || 'atomic';
-        const historyToSend = (memoryMode === 'atomic') ? [] : conversationHistory;
 
         try {
             const response = await fetch('/api/process-text', {
@@ -800,7 +783,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     text: text.trim(),
-                    conversation_history: historyToSend,
+                    conversation_history: [], // Always atomic: single turn context
                     custom_keys: customKeys
                 }),
                 signal: sessionState.abortController.signal
@@ -973,9 +956,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateMessageCount() {
         const turns = Math.floor(conversationHistory.length / 2);
         if (messageCountEl) {
-            const memoryMode = localStorage.getItem('voice_memory_mode') || 'atomic';
-            const badge = memoryMode === 'atomic' ? ' (Atomic)' : '';
-            messageCountEl.innerText = `${turns} turn${turns === 1 ? '' : 's'}${badge}`;
+            messageCountEl.innerText = `${turns} turn${turns === 1 ? '' : 's'}`;
         }
     }
 
@@ -1208,7 +1189,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return {
             pipeline_mode: currentMode,
             llm_provider: currentMode,
-            memory_mode: localStorage.getItem('voice_memory_mode') || 'atomic',
             groq_model: selectGroqModel ? selectGroqModel.value : undefined,
             openai_model: selectOpenAIModel ? selectOpenAIModel.value : undefined,
             gemini_model: selectGeminiModel ? selectGeminiModel.value : undefined,
