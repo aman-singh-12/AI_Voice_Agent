@@ -239,6 +239,16 @@
                     </select>
                 </div>
 
+                <!-- Conversation Context Memory Mode -->
+                <div class="form-group" style="margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+                    <label for="selectMemoryMode">Conversation Memory</label>
+                    <select id="selectMemoryMode">
+                        <option value="atomic" selected>Atomic / Single Turn (Fresh query each time - Recommended)</option>
+                        <option value="multi-turn">Multi-Turn (Preserve conversation history)</option>
+                    </select>
+                    <small class="field-hint">Atomic mode treats each query independently with only current context, preventing prior exchanges from carrying over.</small>
+                </div>
+
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" id="btnCancelModal">Cancel</button>
                     <button type="submit" class="btn-primary">Save Settings</button>

@@ -33,6 +33,7 @@ class AudioRecorder {
         // Native Web Speech Recognition for continuous transcription
         this.recognition = null;
         this.turnStartIndex = 0;
+        this.latestResultIndex = 0;
         this.currentLiveTranscript = "";
         this.hasNativeSpeechRecognition = ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
         this.initSpeechRecognition();
@@ -57,6 +58,7 @@ class AudioRecorder {
             this.recognition.lang = 'en-US';
 
             this.recognition.onresult = (event) => {
+                this.latestResultIndex = event.results.length;
                 if (this.isMuted) {
                     this.turnStartIndex = event.results.length;
                     return;
@@ -109,9 +111,11 @@ class AudioRecorder {
             };
 
             this.recognition.onend = () => {
-                if (this.isLiveCall && this.isRecording) {
+                if (this.isLiveCall && this.isRecording && !this.isMuted) {
                     try {
                         this.turnStartIndex = 0;
+                        this.latestResultIndex = 0;
+                        this.currentLiveTranscript = "";
                         this.recognition.start();
                     } catch (e) {}
                 }
@@ -137,6 +141,12 @@ class AudioRecorder {
         const transcriptToSend = (this.currentLiveTranscript || "").trim();
         const wavBlob = this.exportCurrentBuffer();
 
+        // Advance turnStartIndex immediately to the end of recognized results
+        // to prevent previous speech from ever leaking into subsequent turns
+        if (this.latestResultIndex !== undefined) {
+            this.turnStartIndex = this.latestResultIndex;
+        }
+
         this.hasSpokenInTurn = false;
         this.lastSpeechTime = 0;
         this.currentLiveTranscript = "";
@@ -157,6 +167,8 @@ class AudioRecorder {
         this.lastSpeechTime = 0;
         this.speechStartTime = null;
         this.currentLiveTranscript = "";
+        this.turnStartIndex = 0;
+        this.latestResultIndex = 0;
         this.isMuted = false;
         this.noiseFloor = 0.008;
 
@@ -265,15 +277,28 @@ class AudioRecorder {
         }
 
         if (muted) {
-            // Keep speech recognition session alive in background
+            // Abort speech recognition while muted to completely flush browser recognition buffer
+            if (this.recognition) {
+                try {
+                    this.recognition.abort();
+                } catch (e) {}
+            }
+            this.turnStartIndex = 0;
+            this.latestResultIndex = 0;
         } else {
-            // Unmuted: immediate hot listening (<10ms)
+            // Unmuted: restart a clean, fresh recognition instance for the new turn
             this.noiseFloor = 0.008;
+            this.turnStartIndex = 0;
+            this.latestResultIndex = 0;
+            this.currentLiveTranscript = "";
             if (this.recognition && this.isLiveCall && this.isRecording) {
                 try {
                     this.recognition.start();
                 } catch (e) {
-                    // Already running
+                    // If browser kept session running, synchronize turnStartIndex
+                    if (this.latestResultIndex !== undefined) {
+                        this.turnStartIndex = this.latestResultIndex;
+                    }
                 }
             }
         }
@@ -309,6 +334,9 @@ class AudioRecorder {
         if (this.recognition) {
             try { this.recognition.abort(); } catch (e) {}
         }
+        this.turnStartIndex = 0;
+        this.latestResultIndex = 0;
+        this.currentLiveTranscript = "";
         if (this.processor) {
             this.processor.disconnect();
             this.processor = null;

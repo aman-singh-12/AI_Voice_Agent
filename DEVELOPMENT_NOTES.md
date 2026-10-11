@@ -42,3 +42,17 @@
 - Model availability is account/project-specific. No model ID is hardcoded as an OpenAI default.
 - Existing SpeechRecognition and local TTS behavior are unchanged.
 - Browser automation logged the standard `ScriptProcessorNode` deprecation warning from the existing audio recorder; it did not prevent typed TTS playback.
+
+## Atomic Turn & Continuous SpeechRecognition Isolation (Deployment Fix)
+
+### Root Cause
+- In deployment over HTTPS (e.g., Render), modern browsers maintain a persistent continuous `webkitSpeechRecognition` stream that does not terminate between turns.
+- In `audio-recorder.js`, `this.turnStartIndex` was never advanced upon turn trigger, and `setMuted(true)` did not flush or abort the browser's accumulated `SpeechRecognition` results buffer.
+- When subsequent queries were spoken, the loop iterated from index 0 across all prior turns, prepending the previous queries (e.g., "hello how are you") to the new utterance.
+- On localhost, this did not occur because HTTP local sessions frequently timed out/restarted speech recognition (`onend`), Click-to-Talk aborted between recordings, and local Ollama was evaluated with single-prompt formatting.
+
+### Fix
+- Updated [audio-recorder.js](file:///c:/Users/aman7/testing%20AI/static/audio-recorder.js) to track `latestResultIndex` and immediately advance `turnStartIndex` upon `triggerTurn()`.
+- Abort speech recognition on mute to flush the browser's internal results array, starting a clean fresh recognition session on unmute for each new turn.
+- Added a `Conversation Memory` option in Settings ([index.html](file:///c:/Users/aman7/testing%20AI/static/index.html) and [app.js](file:///c:/Users/aman7/testing%20AI/static/app.js)) defaulting to **Atomic / Single-Turn** mode to guarantee queries are processed as fresh, isolated requests without prior history pollution.
+

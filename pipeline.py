@@ -100,10 +100,13 @@ class LocalOllamaLLMService:
         """
         try:
             sys_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
-            messages = [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": prompt}
-            ]
+            messages = [{"role": "system", "content": sys_prompt}]
+            for msg in (conversation_history or []):
+                role = msg.get("role")
+                content = msg.get("content")
+                if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+                    messages.append({"role": role, "content": content.strip()})
+            messages.append({"role": "user", "content": prompt})
 
             payload = {
                 "model": self.model,
