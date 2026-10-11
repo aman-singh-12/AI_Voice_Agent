@@ -4,7 +4,11 @@ python-multipart
 requests
 SpeechRecognition
 openai
+groq
+google-genai
 python-dotenv
 edge-tts
 wsproto
 websockets
+pytest
+pytest-asyncio

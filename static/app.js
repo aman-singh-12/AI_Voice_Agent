@@ -24,9 +24,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const connectionStatus = document.getElementById('connectionStatus');
     const badgePipeline = document.getElementById('badgePipeline');
 
-    const btnModeLocal = document.getElementById('btnModeLocal');
+    const btnModeGroq = document.getElementById('btnModeGroq');
     const btnModeOpenAI = document.getElementById('btnModeOpenAI');
-    const btnModeCloud = document.getElementById('btnModeCloud');
+    const btnModeGemini = document.getElementById('btnModeGemini');
+    const btnModeCloud = btnModeGroq; // Backward compatibility alias
+    const btnModeLocal = null;
 
     const chatHistory = document.getElementById('chatHistory');
     const emptyState = document.getElementById('emptyState');
@@ -50,16 +52,33 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCancelModal = document.getElementById('btnCancelModal');
     const settingsForm = document.getElementById('settingsForm');
     const selectPipelineMode = document.getElementById('selectPipelineMode');
-    const localSettingsSection = document.getElementById('localSettingsSection');
-    const cloudSettingsSection = document.getElementById('cloudSettingsSection');
-    const openaiSettingsSection = document.getElementById('openaiSettingsSection');
 
-    const selectOllamaModel = document.getElementById('selectOllamaModel');
-    const selectLocalVoice = document.getElementById('selectLocalVoice');
+    const sectionGroqSettings = document.getElementById('sectionGroqSettings');
+    const sectionOpenAISettings = document.getElementById('sectionOpenAISettings');
+    const sectionGeminiSettings = document.getElementById('sectionGeminiSettings');
+
+    const groqStatusBadge = document.getElementById('groqStatusBadge');
+    const openaiStatusBadge = document.getElementById('openaiStatusBadge');
+    const geminiStatusBadge = document.getElementById('geminiStatusBadge');
+
+    const selectGroqModel = document.getElementById('selectGroqModel');
+    const selectOpenAIModel = document.getElementById('selectOpenAIModel');
+    const selectGeminiModel = document.getElementById('selectGeminiModel');
+
     const inputGroqKey = document.getElementById('inputGroqKey');
+    const inputOpenAIKey = document.getElementById('inputOpenAIKey');
+    const inputGeminiKey = document.getElementById('inputGeminiKey');
+
+    const btnTestGroq = document.getElementById('btnTestGroq');
+    const btnTestOpenAI = document.getElementById('btnTestOpenAI');
+    const btnTestGemini = document.getElementById('btnTestGemini');
+    const testGroqResult = document.getElementById('testGroqResult');
+    const testOpenAIResult = document.getElementById('testOpenAIResult');
+    const testGeminiResult = document.getElementById('testGeminiResult');
+
     const inputElevenKey = document.getElementById('inputElevenKey');
-    const inputOpenAIModel = document.getElementById('inputOpenAIModel');
     const selectElevenVoice = document.getElementById('selectElevenVoice');
+    const selectLocalVoice = document.getElementById('selectLocalVoice');
     const selectSilenceDuration = document.getElementById('selectSilenceDuration');
 
     // Toast
@@ -129,57 +148,65 @@ document.addEventListener('DOMContentLoaded', () => {
 
     checkStatus();
 
-    // Mode Toggle Controls (Local vs OpenAI vs Cloud pipeline engines)
+    // Mode Toggle Controls (Groq vs OpenAI vs Gemini cloud pipeline engines)
     function setPipelineMode(mode) {
+        if (mode === 'cloud' || mode === 'local') mode = 'groq';
         currentMode = mode;
-        if (mode === 'local') {
-            if (btnModeLocal) btnModeLocal.classList.add('active');
-            if (btnModeCloud) btnModeCloud.classList.remove('active');
-            if (btnModeOpenAI) btnModeOpenAI.classList.remove('active');
-            if (badgePipeline) badgePipeline.innerText = 'Local Ollama';
-            if (textLLM) textLLM.innerText = 'Local Ollama (Qwen 2.5)';
-            if (textTTS) textTTS.innerText = 'Neural Voice';
-            if (metricLLMSub) metricLLMSub.innerText = 'Local Ollama';
-            if (metricTTSSub) metricTTSSub.innerText = 'Local TTS';
-            if (connectionStatus) connectionStatus.innerHTML = '● <span style="color: var(--accent-emerald-dark);">Active (Local)</span>';
-            if (selectPipelineMode) selectPipelineMode.value = 'local';
-            if (localSettingsSection) localSettingsSection.style.display = 'block';
-            if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
-            if (openaiSettingsSection) openaiSettingsSection.style.display = 'none';
-        } else if (mode === 'openai') {
-            if (btnModeOpenAI) btnModeOpenAI.classList.add('active');
-            if (btnModeCloud) btnModeCloud.classList.remove('active');
-            if (btnModeLocal) btnModeLocal.classList.remove('active');
+
+        if (btnModeGroq) btnModeGroq.classList.toggle('active', mode === 'groq');
+        if (btnModeOpenAI) btnModeOpenAI.classList.toggle('active', mode === 'openai');
+        if (btnModeGemini) btnModeGemini.classList.toggle('active', mode === 'gemini');
+
+        if (mode === 'openai') {
             if (badgePipeline) badgePipeline.innerText = 'OpenAI API';
-            if (textLLM) textLLM.innerText = 'OpenAI Responses API';
+            if (textLLM) textLLM.innerText = 'OpenAI (gpt-4o-mini)';
             if (textTTS) textTTS.innerText = 'Neural Voice';
             if (metricLLMSub) metricLLMSub.innerText = 'OpenAI';
             if (metricTTSSub) metricTTSSub.innerText = 'Selected TTS';
             if (connectionStatus) connectionStatus.innerHTML = '● <span style="color: var(--accent-blue);">Active (OpenAI)</span>';
-            if (selectPipelineMode) selectPipelineMode.value = 'openai';
-            if (localSettingsSection) localSettingsSection.style.display = 'none';
-            if (cloudSettingsSection) cloudSettingsSection.style.display = 'none';
-            if (openaiSettingsSection) openaiSettingsSection.style.display = 'block';
+        } else if (mode === 'gemini') {
+            if (badgePipeline) badgePipeline.innerText = 'Google Gemini';
+            if (textLLM) textLLM.innerText = 'Gemini 2.5 Flash';
+            if (textTTS) textTTS.innerText = 'Neural Voice';
+            if (metricLLMSub) metricLLMSub.innerText = 'Gemini';
+            if (metricTTSSub) metricTTSSub.innerText = 'Selected TTS';
+            if (connectionStatus) connectionStatus.innerHTML = '● <span style="color: #a855f7;">Active (Gemini)</span>';
         } else {
-            if (btnModeCloud) btnModeCloud.classList.add('active');
-            if (btnModeLocal) btnModeLocal.classList.remove('active');
-            if (btnModeOpenAI) btnModeOpenAI.classList.remove('active');
+            // Groq default
             if (badgePipeline) badgePipeline.innerText = 'Groq Cloud';
             if (textLLM) textLLM.innerText = 'Groq (LPU)';
             if (textTTS) textTTS.innerText = 'ElevenLabs';
             if (metricLLMSub) metricLLMSub.innerText = 'Groq LPU';
             if (metricTTSSub) metricTTSSub.innerText = 'ElevenLabs';
-            if (connectionStatus) connectionStatus.innerHTML = '● <span style="color: var(--accent-cyan);">Active (Cloud)</span>';
-            if (selectPipelineMode) selectPipelineMode.value = 'cloud';
-            if (localSettingsSection) localSettingsSection.style.display = 'none';
-            if (cloudSettingsSection) cloudSettingsSection.style.display = 'block';
-            if (openaiSettingsSection) openaiSettingsSection.style.display = 'none';
+            if (connectionStatus) connectionStatus.innerHTML = '● <span style="color: var(--accent-cyan);">Active (Groq)</span>';
+        }
+
+        if (selectPipelineMode) selectPipelineMode.value = mode;
+        if (sectionGroqSettings) sectionGroqSettings.style.display = (mode === 'groq') ? 'block' : 'none';
+        if (sectionOpenAISettings) sectionOpenAISettings.style.display = (mode === 'openai') ? 'block' : 'none';
+        if (sectionGeminiSettings) sectionGeminiSettings.style.display = (mode === 'gemini') ? 'block' : 'none';
+    }
+
+    async function switchProvider(mode) {
+        setPipelineMode(mode);
+        try {
+            const res = await fetch('/api/save-keys', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ llm_provider: mode })
+            });
+            if (res.ok) {
+                showToast(`Switched active provider to ${mode.toUpperCase()}`, 'info');
+                await checkStatus();
+            }
+        } catch (err) {
+            console.warn('Failed to switch provider on backend:', err);
         }
     }
 
-    if (btnModeLocal) btnModeLocal.addEventListener('click', () => setPipelineMode('local'));
-    if (btnModeOpenAI) btnModeOpenAI.addEventListener('click', () => setPipelineMode('openai'));
-    if (btnModeCloud) btnModeCloud.addEventListener('click', () => setPipelineMode('cloud'));
+    if (btnModeGroq) btnModeGroq.addEventListener('click', () => switchProvider('groq'));
+    if (btnModeOpenAI) btnModeOpenAI.addEventListener('click', () => switchProvider('openai'));
+    if (btnModeGemini) btnModeGemini.addEventListener('click', () => switchProvider('gemini'));
 
     if (selectPipelineMode) {
         selectPipelineMode.addEventListener('change', (e) => {
@@ -912,15 +939,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         bubble.innerHTML = `
             <div>${escapeHtml(text)}</div>
-            <div class="bubble-meta">
-                ${latencyHtml}
-                ${audioUrl ? `
-                    <button class="replay-btn" onclick="window.playSnippet('${audioUrl}')">
-                        <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                        Replay
-                    </button>
-                ` : ''}
-            </div>
+            ${latencyHtml ? `
+                <div class="bubble-meta">
+                    ${latencyHtml}
+                </div>
+            ` : ''}
         `;
         chatHistory.appendChild(bubble);
         chatHistory.scrollTop = chatHistory.scrollHeight;
@@ -1035,31 +1058,125 @@ document.addEventListener('DOMContentLoaded', () => {
     btnCloseModal.addEventListener('click', closeModal);
     btnCancelModal.addEventListener('click', closeModal);
 
+    // ----------------------------------------------------
+    // Provider Connection Testing & Status Management
+    // ----------------------------------------------------
+    async function testProviderConnection(provider, btnEl, resultEl, badgeEl, modelSelectEl, keyInputEl) {
+        if (!btnEl || !resultEl) return;
+        const originalText = btnEl.innerText;
+        btnEl.disabled = true;
+        btnEl.innerText = 'Testing...';
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = `<span style="color: var(--text-muted); font-size: 0.8rem;">Testing connection to ${provider}...</span>`;
+        if (badgeEl) {
+            badgeEl.className = 'status-badge badge-checking';
+            badgeEl.innerText = 'Testing';
+        }
+
+        const modelVal = modelSelectEl ? modelSelectEl.value : undefined;
+        const keyVal = keyInputEl && keyInputEl.value.trim() ? keyInputEl.value.trim() : undefined;
+        try {
+            const res = await fetch('/api/llm/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider, model: modelVal, api_key: keyVal })
+            });
+            const data = await res.json();
+            const isConnected = data.connected === true || data.status === 'Connected' || data.status === 'success';
+            if (isConnected) {
+                resultEl.innerHTML = `<span style="color: var(--accent-emerald-dark); font-size: 0.8rem; font-weight: 600;">✓ ${escapeHtml(data.message || 'Connected successfully!')}</span>`;
+                if (badgeEl) {
+                    badgeEl.className = 'status-badge badge-connected';
+                    badgeEl.innerText = 'Connected';
+                }
+                showToast(`${provider.toUpperCase()} connection verified!`, 'success');
+            } else {
+                const errText = data.error || data.message || 'Connection failed';
+                resultEl.innerHTML = `<span style="color: var(--accent-rose); font-size: 0.8rem;">✗ ${escapeHtml(errText)}</span>`;
+                if (badgeEl) {
+                    badgeEl.className = 'status-badge badge-error';
+                    const st = (data.status || '').toLowerCase();
+                    if (st.includes('auth')) {
+                        badgeEl.innerText = 'Auth Failed';
+                    } else if (st.includes('model')) {
+                        badgeEl.innerText = 'Model Unavailable';
+                    } else if (st.includes('not configured')) {
+                        badgeEl.className = 'status-badge badge-not-configured';
+                        badgeEl.innerText = 'Not Configured';
+                    } else {
+                        badgeEl.innerText = data.status || 'Provider Unavailable';
+                    }
+                }
+                showToast(`${provider.toUpperCase()} test failed: ${errText}`, 'error');
+            }
+        } catch (err) {
+            resultEl.innerHTML = `<span style="color: var(--accent-rose); font-size: 0.8rem;">✗ Error: ${escapeHtml(err.message)}</span>`;
+            if (badgeEl) {
+                badgeEl.className = 'status-badge badge-error';
+                badgeEl.innerText = 'Network Error';
+            }
+        } finally {
+            btnEl.disabled = false;
+            btnEl.innerText = originalText;
+        }
+    }
+
+    if (btnTestGroq) {
+        btnTestGroq.addEventListener('click', () => {
+            testProviderConnection('groq', btnTestGroq, testGroqResult, groqStatusBadge, selectGroqModel, inputGroqKey);
+        });
+    }
+    if (btnTestOpenAI) {
+        btnTestOpenAI.addEventListener('click', () => {
+            testProviderConnection('openai', btnTestOpenAI, testOpenAIResult, openaiStatusBadge, selectOpenAIModel, inputOpenAIKey);
+        });
+    }
+    if (btnTestGemini) {
+        btnTestGemini.addEventListener('click', () => {
+            testProviderConnection('gemini', btnTestGemini, testGeminiResult, geminiStatusBadge, selectGeminiModel, inputGeminiKey);
+        });
+    }
+
     settingsForm.addEventListener('submit', async (e) => {
         e.preventDefault();
 
+        const selectedProvider = selectPipelineMode ? selectPipelineMode.value : currentMode;
         const payload = {
-            pipeline_mode: selectPipelineMode.value,
-            ollama_model: selectOllamaModel.value,
-            local_voice: selectLocalVoice.value,
-            groq_api_key: inputGroqKey.value.trim(),
-            elevenlabs_api_key: inputElevenKey.value.trim(),
-            elevenlabs_voice_id: selectElevenVoice.value,
-            openai_model: inputOpenAIModel.value.trim()
+            llm_provider: selectedProvider,
+            pipeline_mode: selectedProvider,
+            groq_model: selectGroqModel ? selectGroqModel.value : undefined,
+            openai_model: selectOpenAIModel ? selectOpenAIModel.value : undefined,
+            gemini_model: selectGeminiModel ? selectGeminiModel.value : undefined,
+            groq_api_key: inputGroqKey && inputGroqKey.value.trim() ? inputGroqKey.value.trim() : undefined,
+            openai_api_key: inputOpenAIKey && inputOpenAIKey.value.trim() ? inputOpenAIKey.value.trim() : undefined,
+            gemini_api_key: inputGeminiKey && inputGeminiKey.value.trim() ? inputGeminiKey.value.trim() : undefined,
+            elevenlabs_api_key: inputElevenKey && inputElevenKey.value.trim() ? inputElevenKey.value.trim() : undefined,
+            elevenlabs_voice_id: selectElevenVoice ? selectElevenVoice.value : undefined,
+            local_voice: selectLocalVoice ? selectLocalVoice.value : undefined
         };
+
+        // Filter out undefined keys so backend preserves existing server credentials
+        const cleanPayload = {};
+        for (const [k, v] of Object.entries(payload)) {
+            if (v !== undefined) cleanPayload[k] = v;
+        }
 
         try {
             const res = await fetch('/api/save-keys', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(cleanPayload)
             });
 
             if (res.ok) {
                 showToast('Pipeline configuration saved!', 'success');
                 closeModal();
-                setPipelineMode(payload.pipeline_mode);
-                checkStatus();
+                setPipelineMode(selectedProvider);
+                if (inputGroqKey) inputGroqKey.value = '';
+                if (inputOpenAIKey) inputOpenAIKey.value = '';
+                if (inputGeminiKey) inputGeminiKey.value = '';
+                if (inputElevenKey) inputElevenKey.value = '';
+                await checkStatus();
             } else {
                 showToast('Failed to save settings.', 'error');
             }
@@ -1071,13 +1188,44 @@ document.addEventListener('DOMContentLoaded', () => {
     function getCustomConfig() {
         return {
             pipeline_mode: currentMode,
-            ollama_model: selectOllamaModel.value || 'qwen2.5:1.5b',
-            local_voice: selectLocalVoice.value || 'en-US-JennyNeural',
-            groq_api_key: inputGroqKey.value.trim() || undefined,
-            elevenlabs_api_key: inputElevenKey.value.trim() || undefined,
-            elevenlabs_voice_id: selectElevenVoice.value || undefined,
-            openai_model: inputOpenAIModel.value.trim() || undefined
+            llm_provider: currentMode,
+            groq_model: selectGroqModel ? selectGroqModel.value : undefined,
+            openai_model: selectOpenAIModel ? selectOpenAIModel.value : undefined,
+            gemini_model: selectGeminiModel ? selectGeminiModel.value : undefined,
+            local_voice: selectLocalVoice ? selectLocalVoice.value : 'en-US-JennyNeural'
         };
+    }
+
+    function populateSelectOptions(selectEl, models, currentModel) {
+        if (!selectEl || !models || models.length === 0) return;
+        const previousVal = currentModel || selectEl.value;
+        const exists = models.includes(previousVal);
+        let html = '';
+        if (previousVal && !exists) {
+            html += `<option value="${escapeHtml(previousVal)}" selected>${escapeHtml(previousVal)} (active)</option>`;
+        }
+        html += models.map(m => `<option value="${escapeHtml(m)}" ${m === previousVal ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
+        selectEl.innerHTML = html;
+    }
+
+    function updateBadge(badgeEl, info) {
+        if (!badgeEl) return;
+        if (!info || !info.configured) {
+            badgeEl.className = 'status-badge badge-not-configured';
+            badgeEl.innerText = 'Not Configured';
+        } else if (info.status === 'ready' || info.status === 'configured' || info.status === 'Connected' || info.connected === true) {
+            badgeEl.className = 'status-badge badge-connected';
+            badgeEl.innerText = 'Connected';
+        } else if (info.status === 'model_unavailable' || info.status === 'Model Unavailable') {
+            badgeEl.className = 'status-badge badge-error';
+            badgeEl.innerText = 'Model Unavailable';
+        } else if (info.status === 'auth_failed' || info.status === 'Authentication Failed') {
+            badgeEl.className = 'status-badge badge-error';
+            badgeEl.innerText = 'Auth Failed';
+        } else {
+            badgeEl.className = 'status-badge badge-connected';
+            badgeEl.innerText = 'Configured';
+        }
     }
 
     async function checkStatus() {
@@ -1085,17 +1233,37 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/status');
             const data = await res.json();
             
-            if (data.mode) {
-                setPipelineMode(data.mode);
+            const activeProvider = data.llm_provider || data.mode || 'groq';
+            setPipelineMode(activeProvider);
+
+            // Update badges
+            if (data.groq) updateBadge(groqStatusBadge, data.groq);
+            if (data.openai) updateBadge(openaiStatusBadge, data.openai);
+            if (data.gemini) updateBadge(geminiStatusBadge, data.gemini);
+
+            // Populate models
+            if (data.groq && data.groq.available_models) {
+                populateSelectOptions(selectGroqModel, data.groq.available_models, data.groq.model);
+            }
+            if (data.openai && data.openai.available_models) {
+                populateSelectOptions(selectOpenAIModel, data.openai.available_models, data.openai.model);
+            }
+            if (data.gemini && data.gemini.available_models) {
+                populateSelectOptions(selectGeminiModel, data.gemini.available_models, data.gemini.model);
             }
 
-            if (data.local.installed_models && data.local.installed_models.length > 0) {
-                selectOllamaModel.innerHTML = data.local.installed_models
-                    .map(m => `<option value="${m}">${m}</option>`)
-                    .join('');
+            // Update placeholders for configured keys (never exposing raw secrets)
+            if (inputGroqKey && data.groq && data.groq.configured) {
+                inputGroqKey.placeholder = '•••••••••••••••• (Configured on server)';
             }
-            if (data.openai && inputOpenAIModel) {
-                inputOpenAIModel.value = data.openai.model || '';
+            if (inputOpenAIKey && data.openai && data.openai.configured) {
+                inputOpenAIKey.placeholder = '•••••••••••••••• (Configured on server)';
+            }
+            if (inputGeminiKey && data.gemini && data.gemini.configured) {
+                inputGeminiKey.placeholder = '•••••••••••••••• (Configured on server)';
+            }
+            if (inputElevenKey && data.elevenlabs && data.elevenlabs.configured) {
+                inputElevenKey.placeholder = '•••••••••••••••• (Configured on server)';
             }
         } catch (e) {
             console.warn('Could not fetch status:', e);

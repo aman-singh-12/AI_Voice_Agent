@@ -373,21 +373,42 @@ class ElevenLabsTTSService:
             raise VoicePipelineError("TTS", f"ElevenLabs network request failed: {str(e)}", e)
 
 
+from llm_service import UnifiedLLMManager, LLMProviderError, BaseLLMProvider
+
 class VoicePipeline:
     """
     Unified Voice AI Pipeline supporting:
-    1. 100% Local Mode: SpeechRecognition -> Local Ollama (Qwen 2.5) -> Local Neural TTS (0 API Keys)
-    2. Cloud Mode: SpeechRecognition -> Groq -> ElevenLabs
+    1. Unified Cloud LLM Architecture: Groq (LPU), OpenAI, Google Gemini
+    2. Local Ollama fallback
+    3. Faster-Whisper / SpeechRecognition STT
+    4. ElevenLabs and Local Neural TTS
     """
 
     def __init__(self):
         self.stt = SpeechToTextService()
-        self.local_llm = LocalOllamaLLMService()
-        self.cloud_llm = GroqLLMService()
-        self.openai_llm = OpenAILLMService()
+        self.llm_manager = UnifiedLLMManager()
         self.local_tts = LocalNeuralTTSService()
         self.cloud_tts = ElevenLabsTTSService()
-        self.mode = os.getenv("PIPELINE_MODE", "local")
+        self.mode = os.getenv("LLM_PROVIDER") or os.getenv("PIPELINE_MODE", "groq")
+
+        # Compatibility aliases for legacy properties
+        self.local_llm = self.llm_manager.get_provider("local")
+        self.cloud_llm = self.llm_manager.get_provider("groq")
+        self.openai_llm = self.llm_manager.get_provider("openai")
+        self.gemini_llm = self.llm_manager.get_provider("gemini")
+
+    def stream_llm(
+        self,
+        prompt: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        provider_name: Optional[str] = None
+    ):
+        """Yields streaming string chunks from the active LLM provider."""
+        return self.llm_manager.generate_stream(
+            prompt=prompt,
+            conversation_history=conversation_history,
+            provider_name=provider_name
+        )
 
     def process_voice(
         self,
@@ -399,20 +420,20 @@ class VoicePipeline:
         total_start = time.time()
         
         keys = custom_keys or {}
-        active_mode = keys.get("pipeline_mode", self.mode)
+        raw_mode = keys.get("llm_provider") or keys.get("pipeline_mode") or self.llm_manager.resolve_active_provider_name()
+        active_provider = "groq" if raw_mode == "cloud" else raw_mode.lower()
 
         # Dynamic parameter overrides
+        if keys.get("groq_api_key") or keys.get("groq_model"):
+            self.llm_manager.configure_provider("groq", api_key=keys.get("groq_api_key"), model=keys.get("groq_model"))
+        if keys.get("openai_api_key") or keys.get("openai_model"):
+            self.llm_manager.configure_provider("openai", api_key=keys.get("openai_api_key"), model=keys.get("openai_model"))
+        if keys.get("gemini_api_key") or keys.get("gemini_model"):
+            self.llm_manager.configure_provider("gemini", api_key=keys.get("gemini_api_key"), model=keys.get("gemini_model"))
         if keys.get("ollama_model"):
-            self.local_llm.model = keys["ollama_model"]
+            self.llm_manager.configure_provider("local", model=keys.get("ollama_model"))
         if keys.get("local_voice"):
             self.local_tts.voice = keys["local_voice"]
-        if keys.get("groq_api_key"):
-            self.cloud_llm.api_key = keys["groq_api_key"]
-        if keys.get("groq_model"):
-            self.cloud_llm.model = keys["groq_model"]
-        if keys.get("openai_model"):
-            self.openai_llm.model = keys["openai_model"]
-            self.openai_llm._verified_model = None
         if keys.get("elevenlabs_api_key"):
             self.cloud_tts.api_key = keys["elevenlabs_api_key"]
         if keys.get("elevenlabs_voice_id"):
@@ -423,29 +444,26 @@ class VoicePipeline:
         user_text = self.stt.transcribe(audio_bytes)
         metrics["stt_time_ms"] = round((time.time() - stt_start) * 1000, 2)
 
-        # Step 2: LLM
+        # Step 2: Unified LLM
         llm_start = time.time()
-        if active_mode == "local":
-            assistant_text = self.local_llm.generate_response(
+        try:
+            assistant_text = self.llm_manager.generate_response(
                 prompt=user_text,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                provider_name=active_provider
             )
-        elif active_mode == "openai":
-            assistant_text = self.openai_llm.generate_response(
-                prompt=user_text,
-                conversation_history=conversation_history
-            )
-        else:
-            assistant_text = self.cloud_llm.generate_response(
-                prompt=user_text,
-                conversation_history=conversation_history
-            )
+        except LLMProviderError as lpe:
+            raise VoicePipelineError("LLM", lpe.message, lpe)
+        except Exception as e:
+            if isinstance(e, VoicePipelineError):
+                raise e
+            raise VoicePipelineError("LLM", f"LLM generation failed: {str(e)}", e)
         metrics["llm_time_ms"] = round((time.time() - llm_start) * 1000, 2)
 
-        # Step 3: TTS
+        # Step 3: TTS (ElevenLabs with fallback to Local Neural TTS)
         tts_start = time.time()
         audio_mp3_bytes = None
-        if active_mode != "local" and (keys.get("elevenlabs_api_key") or os.getenv("ELEVENLABS_API_KEY")):
+        if active_provider != "local" and (keys.get("elevenlabs_api_key") or os.getenv("ELEVENLABS_API_KEY")):
             try:
                 audio_mp3_bytes = self.cloud_tts.synthesize(assistant_text)
             except Exception as e:
@@ -466,7 +484,8 @@ class VoicePipeline:
             "assistant_text": assistant_text,
             "audio_url": audio_data_uri,
             "metrics": metrics,
-            "mode": active_mode
+            "mode": active_provider,
+            "provider": active_provider
         }
 
     def process_text_only(
@@ -479,19 +498,19 @@ class VoicePipeline:
         total_start = time.time()
 
         keys = custom_keys or {}
-        active_mode = keys.get("pipeline_mode", self.mode)
+        raw_mode = keys.get("llm_provider") or keys.get("pipeline_mode") or self.llm_manager.resolve_active_provider_name()
+        active_provider = "groq" if raw_mode == "cloud" else raw_mode.lower()
 
+        if keys.get("groq_api_key") or keys.get("groq_model"):
+            self.llm_manager.configure_provider("groq", api_key=keys.get("groq_api_key"), model=keys.get("groq_model"))
+        if keys.get("openai_api_key") or keys.get("openai_model"):
+            self.llm_manager.configure_provider("openai", api_key=keys.get("openai_api_key"), model=keys.get("openai_model"))
+        if keys.get("gemini_api_key") or keys.get("gemini_model"):
+            self.llm_manager.configure_provider("gemini", api_key=keys.get("gemini_api_key"), model=keys.get("gemini_model"))
         if keys.get("ollama_model"):
-            self.local_llm.model = keys["ollama_model"]
+            self.llm_manager.configure_provider("local", model=keys.get("ollama_model"))
         if keys.get("local_voice"):
             self.local_tts.voice = keys["local_voice"]
-        if keys.get("groq_api_key"):
-            self.cloud_llm.api_key = keys["groq_api_key"]
-        if keys.get("groq_model"):
-            self.cloud_llm.model = keys["groq_model"]
-        if keys.get("openai_model"):
-            self.openai_llm.model = keys["openai_model"]
-            self.openai_llm._verified_model = None
         if keys.get("elevenlabs_api_key"):
             self.cloud_tts.api_key = keys["elevenlabs_api_key"]
         if keys.get("elevenlabs_voice_id"):
@@ -501,27 +520,24 @@ class VoicePipeline:
 
         # LLM
         llm_start = time.time()
-        if active_mode == "local":
-            assistant_text = self.local_llm.generate_response(
+        try:
+            assistant_text = self.llm_manager.generate_response(
                 prompt=user_text,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                provider_name=active_provider
             )
-        elif active_mode == "openai":
-            assistant_text = self.openai_llm.generate_response(
-                prompt=user_text,
-                conversation_history=conversation_history
-            )
-        else:
-            assistant_text = self.cloud_llm.generate_response(
-                prompt=user_text,
-                conversation_history=conversation_history
-            )
+        except LLMProviderError as lpe:
+            raise VoicePipelineError("LLM", lpe.message, lpe)
+        except Exception as e:
+            if isinstance(e, VoicePipelineError):
+                raise e
+            raise VoicePipelineError("LLM", f"LLM generation failed: {str(e)}", e)
         metrics["llm_time_ms"] = round((time.time() - llm_start) * 1000, 2)
 
         # TTS
         tts_start = time.time()
         audio_mp3_bytes = None
-        if active_mode != "local" and (keys.get("elevenlabs_api_key") or os.getenv("ELEVENLABS_API_KEY")):
+        if active_provider != "local" and (keys.get("elevenlabs_api_key") or os.getenv("ELEVENLABS_API_KEY")):
             try:
                 audio_mp3_bytes = self.cloud_tts.synthesize(assistant_text)
             except Exception as e:
@@ -542,5 +558,6 @@ class VoicePipeline:
             "assistant_text": assistant_text,
             "audio_url": audio_data_uri,
             "metrics": metrics,
-            "mode": active_mode
+            "mode": active_provider,
+            "provider": active_provider
         }

@@ -25,11 +25,11 @@
             </div>
         </div>
         <div class="header-actions">
-            <!-- Mode Switcher -->
-            <div class="mode-toggle" style="margin: 0;">
-                <button class="mode-btn active" id="btnModeLocal">💻 Local</button>
-                <button class="mode-btn" id="btnModeOpenAI">✨ OpenAI</button>
-                <button class="mode-btn" id="btnModeCloud">☁️ Cloud</button>
+            <!-- Cloud LLM Provider Switcher -->
+            <div class="mode-toggle" style="margin: 0;" id="providerToggle">
+                <button class="mode-btn" id="btnModeGroq" title="Groq LPU (Ultra-Low Latency)">⚡ Groq</button>
+                <button class="mode-btn" id="btnModeOpenAI" title="OpenAI API">✨ OpenAI</button>
+                <button class="mode-btn" id="btnModeGemini" title="Google Gemini API">💎 Gemini</button>
             </div>
 
             <button class="btn-icon" id="btnClearChat" title="Clear Conversation">
@@ -119,53 +119,92 @@
 
             <form id="settingsForm">
                 <div class="form-group">
-                    <label for="selectPipelineMode">Mode</label>
+                    <label for="selectPipelineMode">Cloud LLM Provider</label>
                     <select id="selectPipelineMode">
-                        <option value="local">💻 Local (Ollama + Qwen 2.5 + Neural Voice)</option>
-                        <option value="cloud">☁️ Cloud (Groq + ElevenLabs)</option>
-                        <option value="openai">✨ OpenAI API</option>
+                        <option value="groq">⚡ Groq (Ultra-Low Latency LPU)</option>
+                        <option value="openai">✨ OpenAI (GPT-4o Mini / Models)</option>
+                        <option value="gemini">💎 Google Gemini (Gemini 2.0 / 2.5 Flash)</option>
                     </select>
                 </div>
 
-                <!-- Local Mode Settings -->
-                <div id="localSettingsSection">
+                <!-- Groq Provider Settings Section -->
+                <div id="sectionGroqSettings">
+                    <div class="provider-status-row">
+                        <span class="provider-status-label">Connection Status:</span>
+                        <span class="provider-status-badge badge-checking" id="groqStatusBadge">Checking...</span>
+                    </div>
                     <div class="form-group">
-                        <label for="selectOllamaModel">Ollama Model</label>
-                        <select id="selectOllamaModel">
-                            <option value="qwen2.5:1.5b">qwen2.5:1.5b (Fast)</option>
-                            <option value="qwen2.5:3b">qwen2.5:3b (High Quality)</option>
+                        <label for="inputGroqKey">Groq API Key</label>
+                        <input type="password" id="inputGroqKey" placeholder="Enter API key...">
+                        <small class="field-hint">Never exposed to browser after save. Only needed if using Groq.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="selectGroqModel">Groq Model</label>
+                        <select id="selectGroqModel">
+                            <option value="qwen/qwen3.8-27b" selected>qwen/qwen3.8-27b (27B - Fast & Efficient)</option>
                         </select>
                     </div>
-
-                    <div class="form-group">
-                        <label for="selectLocalVoice">Voice</label>
-                        <select id="selectLocalVoice">
-                            <option value="en-US-JennyNeural">Jenny (US Female)</option>
-                            <option value="en-US-GuyNeural">Guy (US Male)</option>
-                            <option value="en-US-AriaNeural">Aria (Expressive Female)</option>
-                            <option value="en-GB-SoniaNeural">Sonia (British Female)</option>
-                            <option value="en-IN-NeerjaNeural">Neerja (Indian Female)</option>
-                        </select>
+                    <div class="provider-test-row">
+                        <button type="button" class="btn-test-connection" id="btnTestGroq">Test Groq Connection</button>
+                        <span class="test-result-msg" id="testGroqResult"></span>
                     </div>
                 </div>
 
-                <!-- Cloud Mode Settings -->
-                <div id="cloudSettingsSection" style="display: none;">
+                <!-- OpenAI Provider Settings Section -->
+                <div id="sectionOpenAISettings" style="display: none;">
+                    <div class="provider-status-row">
+                        <span class="provider-status-label">Connection Status:</span>
+                        <span class="provider-status-badge badge-checking" id="openaiStatusBadge">Checking...</span>
+                    </div>
                     <div class="form-group">
-                        <label for="inputGroqKey">Groq API Key</label>
-                        <input type="password" id="inputGroqKey" placeholder="gsk_...">
+                        <label for="inputOpenAIKey">OpenAI API Key</label>
+                        <input type="password" id="inputOpenAIKey" placeholder="Enter API key...">
+                        <small class="field-hint">Never exposed to browser after save. Only needed if using OpenAI.</small>
                     </div>
-
-                    <div id="openaiSettingsSection" style="display: none;">
-                        <div class="form-group">
-                            <label for="inputOpenAIModel">OpenAI Model</label>
-                            <input type="text" id="inputOpenAIModel" placeholder="gpt-4o-mini">
-                        </div>
+                    <div class="form-group">
+                        <label for="selectOpenAIModel">OpenAI Model</label>
+                        <select id="selectOpenAIModel">
+                            <option value="gpt-4o-mini" selected>gpt-4o-mini (Fast & Low Cost)</option>
+                        </select>
                     </div>
+                    <div class="provider-test-row">
+                        <button type="button" class="btn-test-connection" id="btnTestOpenAI">Test OpenAI Connection</button>
+                        <span class="test-result-msg" id="testOpenAIResult"></span>
+                    </div>
+                </div>
 
+                <!-- Google Gemini Settings Section -->
+                <div id="sectionGeminiSettings" style="display: none;">
+                    <div class="provider-status-row">
+                        <span class="provider-status-label">Connection Status:</span>
+                        <span class="provider-status-badge badge-checking" id="geminiStatusBadge">Checking...</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="inputGeminiKey">Gemini API Key</label>
+                        <input type="password" id="inputGeminiKey" placeholder="Enter API key...">
+                        <small class="field-hint">Never exposed to browser after save. Only needed if using Gemini.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="selectGeminiModel">Gemini Model</label>
+                        <select id="selectGeminiModel">
+                            <option value="gemini-2.0-flash">gemini-2.0-flash (Fast & Recommended)</option>
+                            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                            <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                        </select>
+                    </div>
+                    <div class="provider-test-row">
+                        <button type="button" class="btn-test-connection" id="btnTestGemini">Test Gemini Connection</button>
+                        <span class="test-result-msg" id="testGeminiResult"></span>
+                    </div>
+                </div>
+
+                <!-- Text-to-Speech (TTS) Configuration -->
+                <div style="margin-top: 0.85rem; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+                    <div style="font-weight: 600; font-size: 0.86rem; margin-bottom: 0.5rem; color: var(--text-primary);">Text-to-Speech (TTS)</div>
                     <div class="form-group">
                         <label for="inputElevenKey">ElevenLabs API Key</label>
-                        <input type="password" id="inputElevenKey" placeholder="xi-api-key...">
+                        <input type="password" id="inputElevenKey" placeholder="Optional. Leave blank to use Neural Voice">
                     </div>
 
                     <div class="form-group">
@@ -174,6 +213,17 @@
                             <option value="21m00Tcm4TlvDq8ikWAM">Rachel (Female)</option>
                             <option value="pNInz6obpgDQGcFmaJgB">Adam (Male)</option>
                             <option value="EXAVITQu4vr4xnSDxMaL">Bella (Female)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="selectLocalVoice">Fallback Neural Voice</label>
+                        <select id="selectLocalVoice">
+                            <option value="en-US-JennyNeural">Jenny (US Female)</option>
+                            <option value="en-US-GuyNeural">Guy (US Male)</option>
+                            <option value="en-US-AriaNeural">Aria (Expressive Female)</option>
+                            <option value="en-GB-SoniaNeural">Sonia (British Female)</option>
+                            <option value="en-IN-NeerjaNeural">Neerja (Indian Female)</option>
                         </select>
                     </div>
                 </div>
