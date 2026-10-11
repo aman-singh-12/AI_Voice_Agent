@@ -13,7 +13,7 @@ A high-performance, end-to-end Voice AI Agent pipeline built from scratch withou
 [ 1. STT Engine ] ──► Python SpeechRecognition (Audio ➔ Text)
       │
       ▼
-[ 2. LLM Engine ] ──► Groq API (Ultra-low latency LPU inference: LLaMA 3.3 70B / 3.1 8B)
+[ 2. LLM Engine ] ──► Groq API (Ultra-low latency LPU inference: Qwen 2.5 / GPT-OSS)
       │
       ▼
 [ 3. TTS Engine ] ──► ElevenLabs REST API (Text ➔ MP3 Voice Stream)
@@ -30,7 +30,7 @@ A high-performance, end-to-end Voice AI Agent pipeline built from scratch withou
 | :--- | :--- | :--- |
 | **Backend** | FastAPI + Uvicorn | Lightweight asynchronous server & API routing |
 | **Speech-to-Text (STT)** | Python `SpeechRecognition` | Native Python STT processing 16-bit PCM WAV audio |
-| **LLM Reasoning** | Groq API (`llama-3.3-70b-versatile` / `llama-3.1-8b-instant`) | Ultra-fast LPU conversational reasoning (~150-300ms latency) |
+| **LLM Reasoning** | Groq API (`qwen/qwen3.8-27b`) | Ultra-fast LPU conversational reasoning (~150-300ms latency) |
 | **Text-to-Speech (TTS)**| ElevenLabs API | High-fidelity voice synthesis (`eleven_multilingual_v2`) |
 | **Frontend** | Vanilla JS + HTML5 Web Audio API | Custom PCM WAV encoder, dynamic waveform visualizer, responsive dark UI |
 
@@ -59,7 +59,7 @@ ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
 ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
 
 GROQ_API_KEY=your_groq_api_key_here
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=qwen/qwen3.8-27b
 ```
 
 ### 3. Run the Server
