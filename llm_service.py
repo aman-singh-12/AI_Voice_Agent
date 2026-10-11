@@ -11,12 +11,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_SYSTEM_PROMPT = (
-    "You are a friendly, articulate voice AI assistant on a live phone call. "
-    "Provide a direct, complete, and helpful spoken answer in 2 to 3 natural sentences (around 30-45 words total). "
-    "Never use lists, numbers, asterisks, bullet points, or markdown formatting. "
-    "Always finish every sentence and thought completely."
+DEFAULT_SYSTEM_PROMPT = os.getenv(
+    "SYSTEM_PROMPT",
+    "You are a helpful, intelligent, and natural conversational voice assistant."
 )
+
 
 class LLMProviderError(Exception):
     """Exception raised by LLM providers with stage, provider, and error details."""
@@ -30,14 +29,22 @@ class LLMProviderError(Exception):
 
 
 def format_messages(prompt: str, conversation_history: Optional[List[Dict[str, str]]] = None, system_prompt: Optional[str] = None) -> List[Dict[str, str]]:
-    """Standardizes conversation history and current prompt into role/content list."""
+    """Standardizes conversation history and current prompt into role/content list with a sliding window."""
     sys_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
     messages = [{"role": "system", "content": sys_prompt}]
-    for msg in conversation_history or []:
+    
+    # Maintain a sliding window of recent conversational context (last 12 messages / 6 turns)
+    # to preserve conversational continuity without unbounded token growth.
+    history = conversation_history or []
+    if len(history) > 12:
+        history = history[-12:]
+        
+    for msg in history:
         role = msg.get("role")
         content = msg.get("content")
         if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
             messages.append({"role": role, "content": content.strip()})
+            
     messages.append({"role": "user", "content": prompt.strip()})
     return messages
 
@@ -45,7 +52,7 @@ def format_messages(prompt: str, conversation_history: Optional[List[Dict[str, s
 class BaseLLMProvider(ABC):
     """Abstract Base Class for all LLM providers."""
     
-    def __init__(self, name: str, api_key: Optional[str] = None, model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 150):
+    def __init__(self, name: str, api_key: Optional[str] = None, model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 350):
         self.name = name
         self.api_key = api_key
         self.model = model
@@ -85,7 +92,7 @@ class GroqProvider(BaseLLMProvider):
         "qwen/qwen3.8-27b"
     ]
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 150):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 350):
         key = api_key if api_key is not None else os.getenv("GROQ_API_KEY", "")
         # Strictly sanitize model to eliminate deprecated llama models
         if model and "llama" not in model.lower():
@@ -160,7 +167,10 @@ class GroqProvider(BaseLLMProvider):
                 "available_models": self.RECOMMENDED_MODELS
             }
         except Exception as e:
-            from groq import NotFoundError, AuthenticationError
+            try:
+                from groq import NotFoundError, AuthenticationError
+            except Exception:
+                NotFoundError, AuthenticationError = Exception, Exception
             if isinstance(e, AuthenticationError) or "401" in str(e):
                 return {
                     "status": "Authentication Failed",
@@ -237,7 +247,7 @@ class OpenAIProvider(BaseLLMProvider):
         "gpt-4o-mini"
     ]
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 150):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 350):
         key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY", "")
         selected_model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         super().__init__(name="openai", api_key=key, model=selected_model, temperature=temperature, max_tokens=max_tokens)
@@ -361,7 +371,7 @@ class GeminiProvider(BaseLLMProvider):
         "gemini-1.5-pro"
     ]
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 150):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 350):
         key = (api_key if api_key is not None else os.getenv("GEMINI_API_KEY", "")).strip()
         selected_model = (model or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")).strip()
         super().__init__(name="gemini", api_key=key, model=selected_model, temperature=temperature, max_tokens=max_tokens)
@@ -550,12 +560,12 @@ class LocalOllamaProvider(BaseLLMProvider):
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "options": {"num_thread": 8, "num_predict": 75, "temperature": self.temperature}
+            "options": {"num_thread": 8, "num_predict": self.max_tokens, "temperature": self.temperature}
         }
         try:
             resp = requests.post(self.base_url, json=payload, timeout=12)
             if resp.status_code == 200:
-                return resp.json().get("message", {}).get("content", "").strip() or "I am listening."
+                return resp.json().get("message", {}).get("content", "").strip()
             raise Exception(f"Ollama returned HTTP {resp.status_code}")
         except Exception as e:
             raise LLMProviderError(provider="local", message=f"Local Ollama generation failed: {str(e)}", original_error=e)

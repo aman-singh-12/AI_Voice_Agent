@@ -81,11 +81,9 @@ class SpeechToTextService:
 class LocalOllamaLLMService:
     """Local LLM Service using local Ollama instance (Qwen 2.5) optimized for CPU (<1.5s)."""
 
-    DEFAULT_SYSTEM_PROMPT = (
-        "You are a friendly, articulate voice AI assistant on a live phone call. "
-        "Provide a direct, complete, and helpful spoken answer in 2 to 3 natural sentences (around 30-45 words total). "
-        "Never use lists, numbers, asterisks, bullet points, or markdown formatting. "
-        "Always finish every sentence and thought completely so the user gets a satisfying, complete answer."
+    DEFAULT_SYSTEM_PROMPT = os.getenv(
+        "SYSTEM_PROMPT",
+        "You are a helpful, intelligent, and natural conversational voice assistant."
     )
 
     OLLAMA_API_URL = "http://127.0.0.1:11434/api/chat"
@@ -114,9 +112,9 @@ class LocalOllamaLLMService:
                 "stream": False,
                 "options": {
                     "num_thread": 8,
-                    "num_predict": 75,
-                    "num_ctx": 512,
-                    "temperature": 0.4,
+                    "num_predict": 350,
+                    "num_ctx": 1024,
+                    "temperature": 0.7,
                     "top_k": 25
                 }
             }
@@ -125,7 +123,7 @@ class LocalOllamaLLMService:
             if resp.status_code == 200:
                 data = resp.json()
                 answer = data.get("message", {}).get("content", "").strip()
-                return answer if answer else "I'm listening, how can I help you today?"
+                return answer
             else:
                 raise Exception(f"Ollama returned HTTP {resp.status_code}: {resp.text}")
 
@@ -136,11 +134,9 @@ class LocalOllamaLLMService:
 class GroqLLMService:
     """Cloud LLM Service using Groq API for ultra-low latency (<200ms) and complete responses."""
 
-    DEFAULT_SYSTEM_PROMPT = (
-        "You are a friendly, articulate voice AI assistant on a live phone call. "
-        "Provide a direct, complete, and helpful spoken answer in 2 to 3 natural sentences (around 30-45 words total). "
-        "Never use lists, numbers, asterisks, bullet points, or markdown formatting. "
-        "Always finish every sentence and thought completely."
+    DEFAULT_SYSTEM_PROMPT = os.getenv(
+        "SYSTEM_PROMPT",
+        "You are a helpful, intelligent, and natural conversational voice assistant."
     )
 
     GROQ_BASE_URL = "https://api.groq.com/openai/v1"
@@ -170,12 +166,12 @@ class GroqLLMService:
             response = client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=100,
-                temperature=0.5,
+                max_tokens=350,
+                temperature=0.7,
             )
 
             answer = response.choices[0].message.content
-            return answer.strip() if answer else "I didn't have anything to say."
+            return answer.strip() if answer else ""
 
         except Exception as e:
             if isinstance(e, VoicePipelineError):
@@ -237,10 +233,9 @@ class OpenAILLMService:
         try:
             stream = self._get_client().responses.create(
                 model=self.model,
-                instructions=system_prompt or (
-                    "You are a friendly, articulate voice AI assistant. "
-                    "Give direct, helpful answers in 2 to 3 natural spoken sentences. "
-                    "Do not use markdown, bullets, or lists."
+                instructions=system_prompt or os.getenv(
+                    "SYSTEM_PROMPT",
+                    "You are a helpful, intelligent, and natural conversational voice assistant."
                 ),
                 input=messages,
                 stream=True,

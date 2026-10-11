@@ -959,7 +959,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const formData = new FormData();
         formData.append('audio', wavBlob, 'recording.wav');
-        formData.append('history', JSON.stringify([])); // Always atomic: single turn context
+        formData.append('history', JSON.stringify(conversationHistory));
         formData.append('keys', JSON.stringify(customKeys));
 
         try {
@@ -1036,7 +1036,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     text: text.trim(),
-                    conversation_history: [], // Always atomic: single turn context
+                    conversation_history: conversationHistory,
                     custom_keys: customKeys
                 }),
                 signal: sessionState.abortController.signal
