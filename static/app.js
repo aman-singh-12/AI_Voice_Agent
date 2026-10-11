@@ -119,20 +119,20 @@ document.addEventListener('DOMContentLoaded', () => {
     let isProcessing = false;
     let isSpeaking = false;
 
-    // Optional safety timer for prolonged live-call silence
+    // Inactivity timer: Automatically turns off live call after 5 seconds of silence in listening session
     let liveCallInactivityTimer = null;
-    const INACTIVITY_TIMEOUT_MS = 60000; // 60s idle safety
+    const INACTIVITY_TIMEOUT_MS = 5000; // 5s silence timeout
 
-    function startInactivityTimer() {
+    function startInactivityTimer(timeoutMs = INACTIVITY_TIMEOUT_MS) {
         clearInactivityTimer();
         if (sessionState.mode !== MODE_LIVE_CALL || sessionState.status === STATE_IDLE) return;
         liveCallInactivityTimer = setTimeout(() => {
-            if (sessionState.mode === MODE_LIVE_CALL && sessionState.status === STATE_LIVE_LISTENING && !recorder.hasSpokenInTurn) {
-                console.log('Prolonged silence detected. Safely ending live call.');
+            if (sessionState.mode === MODE_LIVE_CALL && (sessionState.status === STATE_LIVE_LISTENING || sessionState.status === STATE_RECORDING) && !recorder.hasSpokenInTurn) {
+                console.log('5s silence detected in listening session. Safely ending live call.');
                 endLiveCall();
-                showToast('Live call ended due to inactivity', 'info');
+                showToast('Live call ended after 5s silence', 'info');
             }
-        }, INACTIVITY_TIMEOUT_MS);
+        }, timeoutMs);
     }
 
     function clearInactivityTimer() {
@@ -512,9 +512,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----------------------------------------------------
     recorder.onVolumeChange = (vol) => {
         if (!recorder.isRecording || recorder.isMuted) return;
-        if (vol > 0.08) {
-            clearInactivityTimer();
-        }
         const scale = 1 + vol * 0.3;
         if (voiceOrb) {
             voiceOrb.style.transform = `scale(${scale})`;
@@ -857,6 +854,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             if (sessionState.mode === MODE_LIVE_CALL) {
                 recorder.setMuted(false);
+                startInactivityTimer();
                 setSessionStatus(STATE_LIVE_LISTENING);
             } else {
                 setSessionStatus(STATE_IDLE);
