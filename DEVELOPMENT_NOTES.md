@@ -2,7 +2,7 @@
 
 ## OpenAI provider experiment
 
-### Setup
+### Setup Ready for development
 
 1. Create and activate the project virtual environment.
 2. Install dependencies with `python -m pip install -r requirements.txt`.
