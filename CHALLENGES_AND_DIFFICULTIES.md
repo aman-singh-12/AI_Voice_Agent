@@ -78,3 +78,19 @@
 ### The Solution:
 - Built an in-app **Settings Modal** in the UI that can securely save keys to `.env` and runtime memory with instant status feedback.
 - Supported multiple Qwen providers (Alibaba DashScope, OpenRouter, and any OpenAI-compatible API base URL).
+
+---
+
+## 7. Incremental WebSocket Delivery & Sentence-Based Audio Streaming
+
+### The Problem:
+- The initial voice pipeline waited for the LLM to complete its entire response before initiating ElevenLabs TTS, and then waited for the complete audio generation before sending anything to the client. This resulted in round-trip latencies of 4–6+ seconds.
+- However, generating TTS on every single LLM token is impractical and would exhaust API rate limits, while slicing a single returned MP3 byte stream corrupts audio headers and breaks browser audio decoders.
+- In addition, the WebSocket connection needed to support dynamic LLM provider selection (OpenAI vs Groq) configured through the existing Settings UI without requiring full page reloads or hardcoded credentials.
+
+### The Solution:
+- **Intelligent Sentence-Based Buffering**: Implemented `extract_ready_sentences()` to segment streaming LLM tokens at natural sentence boundaries (`.`, `!`, `?` with trailing space/quotes) and extended clause boundaries (`:`, `;`, `,`) once a readable threshold is reached.
+- **Independently Encoded Audio Segments**: Each text segment is passed directly to TTS, yielding a standalone, valid MP3 audio file. The segment is Base64-encoded and emitted immediately via WebSocket as an `audio_chunk` event (`turn_id`, `segment_index`, `audio_format`, `audio_data`).
+- **Client-Side FIFO Playback Queue**: The browser begins playing `segment_index: 0` immediately upon receipt, overlapping LLM generation of later sentences and subsequent TTS synthesis with the playback of earlier sentences.
+- **Dynamic Session-State Resolution**: The WebSocket handler resolves `pipeline.llm_manager.resolve_active_provider_name()` on each turn, ensuring setting changes saved via `/api/save-keys` take effect instantly on existing WebSocket sessions.
+

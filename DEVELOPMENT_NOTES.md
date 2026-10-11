@@ -56,3 +56,67 @@
 - Abort speech recognition on mute to flush the browser's internal results array, starting a clean fresh recognition session on unmute for each new turn.
 - Added a `Conversation Memory` option in Settings ([index.html](file:///c:/Users/aman7/testing%20AI/static/index.html) and [app.js](file:///c:/Users/aman7/testing%20AI/static/app.js)) defaulting to **Atomic / Single-Turn** mode to guarantee queries are processed as fresh, isolated requests without prior history pollution.
 
+---
+
+## Minimal WebSocket Frontend Integration and Incremental Audio Streaming
+
+### 1. Why the browser previously used REST
+The initial prototype transmitted user input (transcribed text or WAV audio) exclusively via HTTP POST requests to `/api/process-text` or `/api/process-audio`. While straightforward, HTTP request-response semantics forced the system into batch sequential processing:
+- The backend waited for the LLM to generate the entire response before initiating TTS.
+- The browser had to wait for both the complete LLM response and the entire TTS audio generation to finish before receiving any text or audio.
+- This created perceived turnaround latencies of 3 to 6+ seconds, breaking conversational responsiveness.
+
+### 2. How the browser connects to `/ws/voice`
+The frontend ([static/app.js](file:///c:/Users/aman7/testing%20AI/static/app.js)) initializes a persistent, reusable WebSocket connection on application load:
+- Dynamic URL resolution: `const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'; const wsUrl = `${protocol}//${window.location.host}/ws/voice`;`.
+- Automatic reconnect with exponential / 3-second retry loop on unexpected disconnects.
+- Clean lifecycle handling via `onopen`, `onmessage`, `onerror`, and `onclose`.
+- Seamless fallback: If the WebSocket is ever disconnected or in a non-OPEN state, `processText()` automatically falls back to the `/api/process-text` REST endpoint.
+
+### 3. How incremental text delivery works
+1. The user speech is finalized by browser speech recognition or submitted via chat input.
+2. The browser dispatches a JSON event `{ type: 'text', text: '...', turn_id: 123, history: [...], keys: {...} }` over the WebSocket.
+3. The backend receives the event, verifies credentials against active runtime settings, and invokes `pipeline.stream_llm()`.
+4. As tokens arrive from the active LLM provider (OpenAI, Groq, etc.), the backend emits `text_chunk` events over the WebSocket:
+   ```json
+   { "type": "text_chunk", "turn_id": 123, "text": "token" }
+   ```
+5. The frontend appends arriving tokens progressively to a single streaming assistant chat bubble in real-time, providing immediate visual feedback (< 1s time-to-first-token).
+
+### 4. How sentence-based TTS buffering works
+Rather than waiting for the entire LLM output or naively sending every token to TTS, the backend runs `extract_ready_sentences(sentence_buffer)`:
+- Segments text at natural sentence boundaries (`.`, `!`, `?` followed by whitespace or quotes).
+- Also segments on strong clause delimiters (`;`, `,`, `:`, `—`) if the accumulated buffer exceeds a reasonable reading length (≥ 45 characters).
+- When a segment boundary is detected, the segment is extracted and sent to ElevenLabs TTS (with automatic local Neural TTS fallback).
+- Segment synthesis occurs while subsequent LLM text continues streaming.
+- At stream completion, any remaining buffer is flushed as the final segment.
+
+### 5. How audio segments are delivered and played
+- **Payload format**: Each completed audio segment is Base64-encoded and sent as an `audio_chunk` event:
+  ```json
+  {
+    "type": "audio_chunk",
+    "turn_id": 123,
+    "segment_index": 0,
+    "audio_format": "mp3",
+    "audio_data": "<base64>",
+    "text": "First sentence text."
+  }
+  ```
+- Each segment is an independently formed, complete MP3 audio buffer with standard MPEG headers.
+- **Frontend Playback (FIFO Queue)**:
+  - Arriving `audio_chunk` events are validated by `turn_id` and queued in order of `segment_index`.
+  - Playback begins **immediately** upon receiving `segment_index: 0` without waiting for subsequent tokens or the `response_complete` event.
+  - When `currentAudio.onended` triggers, the next segment in the queue plays sequentially.
+  - When all segments finish playing and `response_complete` has been received, the UI transitions back to listening/idle state.
+
+### 6. Implementation difficulties and solutions
+- **Interleaved Concurrency**: Managing async sentence extraction while receiving synchronous/asynchronous LLM generator chunks was resolved using an internal accumulator and deterministic boundary regex.
+- **Preserving Provider Credential Flow**: Ensuring that both `/api/llm/test` and dynamic settings changes in the UI seamlessly propagate to `/ws/voice` without restarting the connection was accomplished by having the WebSocket read `pipeline.llm_manager.resolve_active_provider_name()` dynamically per turn and accept runtime client keys.
+- **Audio Segment Integrity**: Naive byte slicing creates corrupt MP3 files. Synthesizing each discrete sentence into an independent MP3 ensures each audio chunk is cleanly decodable by browser `Audio` objects.
+
+### 7. Remaining limitations and latency
+- **TTS Synthesis Latency per Sentence**: While the first sentence audio arrives significantly earlier than the full response (typically within 1.5–2.0s), network latency to ElevenLabs remains the primary latency factor.
+- **Single Connection Queue**: The audio queue is managed purely on the client side per turn; packet reordering over WebSocket is prevented by sorting incoming segments by `segment_index`.
+
+

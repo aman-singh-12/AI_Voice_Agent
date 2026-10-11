@@ -113,6 +113,21 @@ document.addEventListener('DOMContentLoaded', () => {
     let conversationHistory = [];
     const recorder = new AudioRecorder();
 
+    // WebSocket Client & Streaming Audio Queue State
+    let voiceWs = null;
+    let wsConnected = false;
+    let wsConnecting = false;
+    let wsReconnectTimer = null;
+
+    // Active Turn Streaming State
+    let activeTurnId = 0;
+    let activeTurnUserText = '';
+    let activeAssistantBubble = null;
+    let activeAssistantText = '';
+    let audioQueue = [];
+    let isPlayingQueue = false;
+    let isTurnResponseComplete = false;
+
     // Legacy sync flags
     let isLiveCallActive = false;
     let isRecording = false;
@@ -477,6 +492,10 @@ document.addEventListener('DOMContentLoaded', () => {
         clearInactivityTimer();
         stopVisualizer();
 
+        audioQueue = [];
+        isPlayingQueue = false;
+        activeTurnId = sessionState.turnId;
+
         if (currentAudio) {
             try {
                 currentAudio.pause();
@@ -730,6 +749,203 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ----------------------------------------------------
+    // WebSocket Client & Streaming Audio Queue State
+    // ----------------------------------------------------
+    function initVoiceWebSocket() {
+        if (voiceWs && (voiceWs.readyState === WebSocket.OPEN || voiceWs.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
+        if (wsReconnectTimer) {
+            clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = null;
+        }
+        wsConnecting = true;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/voice`;
+
+        try {
+            voiceWs = new WebSocket(wsUrl);
+
+            voiceWs.onopen = () => {
+                wsConnected = true;
+                wsConnecting = false;
+                console.log('Voice AI WebSocket /ws/voice connected successfully.');
+                const configPayload = getCustomConfig();
+                voiceWs.send(JSON.stringify({ type: 'config', keys: configPayload }));
+            };
+
+            voiceWs.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch (e) {
+                    console.warn('Failed to parse WebSocket message:', e);
+                }
+            };
+
+            voiceWs.onerror = (err) => {
+                console.warn('Voice AI WebSocket error:', err);
+                wsConnected = false;
+                wsConnecting = false;
+            };
+
+            voiceWs.onclose = () => {
+                wsConnected = false;
+                wsConnecting = false;
+                console.log('Voice AI WebSocket closed. Reconnecting in 3s...');
+                wsReconnectTimer = setTimeout(initVoiceWebSocket, 3000);
+            };
+        } catch (e) {
+            wsConnecting = false;
+            console.warn('Failed to initialize WebSocket:', e);
+            wsReconnectTimer = setTimeout(initVoiceWebSocket, 4000);
+        }
+    }
+
+    function handleWebSocketMessage(data) {
+        const msgType = data.type;
+        const turnId = data.turn_id;
+
+        if (msgType === 'pong' || msgType === 'config_ack') return;
+
+        // Guard against stale turns
+        if (turnId && turnId !== activeTurnId) return;
+
+        if (msgType === 'llm_start') {
+            setSessionStatus(STATE_PROCESSING);
+            if (nodeLLM) nodeLLM.classList.add('active');
+        } else if (msgType === 'text_chunk') {
+            // Progressive text delivery
+            if (!activeAssistantBubble) {
+                activeAssistantBubble = createStreamingAssistantBubble();
+            }
+            const chunk = data.chunk || data.text || '';
+            activeAssistantText += chunk;
+            const contentEl = activeAssistantBubble.querySelector('.assistant-text-content');
+            if (contentEl) {
+                contentEl.innerText = activeAssistantText;
+            }
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        } else if (msgType === 'audio_chunk') {
+            // Incremental audio delivery
+            if (data.audio_data) {
+                const segIndex = typeof data.segment_index === 'number' ? data.segment_index : audioQueue.length;
+                const audioUrl = `data:audio/mp3;base64,${data.audio_data}`;
+                const segment = {
+                    turnId: data.turn_id,
+                    index: segIndex,
+                    audioUrl: audioUrl,
+                    text: data.text || ''
+                };
+                audioQueue.push(segment);
+                audioQueue.sort((a, b) => a.index - b.index);
+
+                // Start playback immediately when the first segment is ready!
+                if (!isPlayingQueue) {
+                    playNextAudioQueueSegment();
+                }
+            }
+        } else if (msgType === 'response_complete') {
+            isTurnResponseComplete = true;
+            // If all audio segments have already finished playing (or if no audio was sent)
+            if (!isPlayingQueue && audioQueue.length === 0) {
+                finishTurnPlayback();
+            }
+        } else if (msgType === 'error' || msgType === 'llm_error') {
+            const stage = data.stage ? `[${data.stage}] ` : '';
+            const errorMsg = data.message || 'Error occurred';
+            showToast(`${stage}${errorMsg}`, 'error');
+            recorder.setMuted(false);
+            setSessionStatus(STATE_ERROR, errorMsg);
+            handleAuthOrKeyError(errorMsg);
+            if (isPlayingQueue && currentAudio) {
+                try { currentAudio.pause(); } catch (e) {}
+                currentAudio = null;
+            }
+            audioQueue = [];
+            isPlayingQueue = false;
+        }
+    }
+
+    function playNextAudioQueueSegment() {
+        if (audioQueue.length === 0) {
+            isPlayingQueue = false;
+            if (isTurnResponseComplete) {
+                finishTurnPlayback();
+            }
+            return;
+        }
+
+        isPlayingQueue = true;
+        setSessionStatus(STATE_SPEAKING);
+        if (nodeTTS) nodeTTS.classList.add('active');
+        if (sessionState.mode === MODE_LIVE_CALL) {
+            recorder.setMuted(true);
+        }
+
+        const nextSeg = audioQueue.shift();
+        if (currentAudio) {
+            try { currentAudio.pause(); } catch (e) {}
+            currentAudio = null;
+        }
+
+        currentAudio = new Audio(nextSeg.audioUrl);
+
+        currentAudio.onended = () => {
+            currentAudio = null;
+            playNextAudioQueueSegment();
+        };
+
+        currentAudio.onerror = (err) => {
+            console.warn('Audio segment playback error:', err);
+            currentAudio = null;
+            playNextAudioQueueSegment();
+        };
+
+        currentAudio.play().catch(e => {
+            console.warn('Audio play failed or auto-play blocked:', e);
+            currentAudio = null;
+            playNextAudioQueueSegment();
+        });
+    }
+
+    function finishTurnPlayback() {
+        isPlayingQueue = false;
+        currentAudio = null;
+        if (nodeTTS) nodeTTS.classList.remove('active');
+        if (nodeLLM) nodeLLM.classList.remove('active');
+        if (nodeSTT) nodeSTT.classList.remove('active');
+
+        // Append completed turn to conversation history
+        if (activeTurnUserText && activeAssistantText) {
+            conversationHistory.push({ role: 'user', content: activeTurnUserText });
+            conversationHistory.push({ role: 'assistant', content: activeAssistantText });
+            updateMessageCount();
+        }
+
+        if (sessionState.mode === MODE_LIVE_CALL) {
+            recorder.setMuted(false);
+            startInactivityTimer();
+            setSessionStatus(STATE_LIVE_LISTENING);
+        } else {
+            setSessionStatus(STATE_IDLE);
+        }
+    }
+
+    function createStreamingAssistantBubble() {
+        if (emptyState) emptyState.style.display = 'none';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble assistant';
+        bubble.innerHTML = `
+            <div class="assistant-text-content"><span style="color: var(--text-muted); font-style: italic;">Thinking...</span></div>
+        `;
+        chatHistory.appendChild(bubble);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+        return bubble;
+    }
+
+    // ----------------------------------------------------
     // API Audio & Text Pipeline Processing
     // ----------------------------------------------------
     async function processAudio(wavBlob) {
@@ -790,6 +1006,28 @@ document.addEventListener('DOMContentLoaded', () => {
         setSessionStatus(STATE_PROCESSING);
         appendUserMessage(text.trim());
 
+        // Check if WebSocket is open and connected for fast real-time streaming
+        if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+            activeTurnId = turnId;
+            activeTurnUserText = text.trim();
+            activeAssistantText = '';
+            activeAssistantBubble = null;
+            audioQueue = [];
+            isPlayingQueue = false;
+            isTurnResponseComplete = false;
+
+            const customKeys = getCustomConfig();
+            voiceWs.send(JSON.stringify({
+                type: 'text',
+                text: text.trim(),
+                turn_id: turnId,
+                history: conversationHistory,
+                keys: customKeys
+            }));
+            return;
+        }
+
+        // REST Fallback if WebSocket is offline
         const customKeys = getCustomConfig();
 
         try {
@@ -944,27 +1182,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const bubble = document.createElement('div');
         bubble.className = 'chat-bubble assistant';
-
-        let latencyHtml = '';
-        if (metrics) {
-            latencyHtml = `
-                <div class="latency-tags">
-                    ${metrics.stt_time_ms > 0 ? `<span class="tag stt">STT: ${metrics.stt_time_ms}ms</span>` : ''}
-                    <span class="tag llm">LLM: ${metrics.llm_time_ms}ms</span>
-                    <span class="tag tts">TTS: ${metrics.tts_time_ms}ms</span>
-                    <span class="tag total">${metrics.total_time_ms}ms</span>
-                </div>
-            `;
-        }
-
-        bubble.innerHTML = `
-            <div>${escapeHtml(text)}</div>
-            ${latencyHtml ? `
-                <div class="bubble-meta">
-                    ${latencyHtml}
-                </div>
-            ` : ''}
-        `;
+        bubble.innerHTML = `<div>${escapeHtml(text)}</div>`;
         chatHistory.appendChild(bubble);
         chatHistory.scrollTop = chatHistory.scrollHeight;
     }
@@ -1061,8 +1279,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btnClearChat.addEventListener('click', clearChat);
     }
 
-    // Initialize UI on load
+    // Initialize UI and WebSocket on load
     updateUI();
+    initVoiceWebSocket();
 
     // ----------------------------------------------------
     // Settings Modal
