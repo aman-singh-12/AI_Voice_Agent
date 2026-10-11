@@ -106,6 +106,13 @@ async def get_status():
         "active_provider": active_provider,
         "llm_provider": active_provider,
         "providers": providers_info["providers"],
+        "groq": providers_info["providers"].get("groq", {}),
+        "openai": providers_info["providers"].get("openai", {}),
+        "gemini": providers_info["providers"].get("gemini", {}),
+        "elevenlabs": {
+            "configured": bool(eleven_key and eleven_key != "your_elevenlabs_api_key_here"),
+            "voice": os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+        },
         "stt": {
             "engine": "SpeechRecognition / Faster-Whisper",
             "configured": True
@@ -118,18 +125,10 @@ async def get_status():
         },
         # Compatibility fields
         "cloud": {
-            "groq_configured": providers_info["providers"]["groq"]["configured"],
-            "groq_model": providers_info["providers"]["groq"]["model"],
+            "groq_configured": providers_info["providers"].get("groq", {}).get("configured", False),
+            "groq_model": providers_info["providers"].get("groq", {}).get("model", ""),
             "elevenlabs_configured": bool(eleven_key and eleven_key != "your_elevenlabs_api_key_here"),
             "elevenlabs_voice": os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-        },
-        "openai": {
-            "configured": providers_info["providers"]["openai"]["configured"],
-            "model": providers_info["providers"]["openai"]["model"]
-        },
-        "gemini": {
-            "configured": providers_info["providers"]["gemini"]["configured"],
-            "model": providers_info["providers"]["gemini"]["model"]
         }
     }
 
@@ -175,6 +174,7 @@ async def save_keys(req: SaveKeysRequest):
         os.environ["LLM_PROVIDER"] = clean_p
         os.environ["PIPELINE_MODE"] = clean_p
         pipeline.llm_manager.set_active_provider(clean_p)
+        pipeline.mode = clean_p
         set_key(env_file, "LLM_PROVIDER", clean_p)
         set_key(env_file, "PIPELINE_MODE", clean_p)
 

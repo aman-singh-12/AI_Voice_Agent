@@ -35,6 +35,7 @@ class AudioRecorder {
         this.turnStartIndex = 0;
         this.latestResultIndex = 0;
         this.currentLiveTranscript = "";
+        this.isRecognitionActive = false;
         this.hasNativeSpeechRecognition = ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
         this.initSpeechRecognition();
     }
@@ -56,6 +57,10 @@ class AudioRecorder {
             this.recognition.continuous = true;
             this.recognition.interimResults = true;
             this.recognition.lang = 'en-US';
+
+            this.recognition.onstart = () => {
+                this.isRecognitionActive = true;
+            };
 
             this.recognition.onresult = (event) => {
                 this.latestResultIndex = event.results.length;
@@ -111,17 +116,14 @@ class AudioRecorder {
             };
 
             this.recognition.onend = () => {
+                this.isRecognitionActive = false;
                 if (this.isLiveCall && this.isRecording && !this.isMuted) {
-                    try {
-                        this.turnStartIndex = 0;
-                        this.latestResultIndex = 0;
-                        this.currentLiveTranscript = "";
-                        this.recognition.start();
-                    } catch (e) {}
+                    this.restartRecognitionSafe();
                 }
             };
 
             this.recognition.onerror = (e) => {
+                this.isRecognitionActive = false;
                 if (e.error !== 'no-speech') {
                     console.debug('Speech recognition status:', e.error);
                 }
@@ -129,6 +131,29 @@ class AudioRecorder {
         } catch (e) {
             this.recognition = null;
         }
+    }
+
+    restartRecognitionSafe() {
+        if (!this.hasNativeSpeechRecognition || !this.recognition) return;
+        this.turnStartIndex = 0;
+        this.latestResultIndex = 0;
+        this.currentLiveTranscript = "";
+        if (this.isRecognitionActive) {
+            try { this.recognition.abort(); } catch (e) {}
+            this.isRecognitionActive = false;
+        }
+        setTimeout(() => {
+            if (this.isLiveCall && this.isRecording && !this.isMuted) {
+                try {
+                    this.recognition.start();
+                    this.isRecognitionActive = true;
+                } catch (e) {
+                    if (e.name !== 'InvalidStateError') {
+                        console.debug('Recognition restart status:', e.message);
+                    }
+                }
+            }
+        }, 60);
     }
 
     triggerTurn() {
@@ -160,7 +185,19 @@ class AudioRecorder {
     }
 
     async start(liveMode = false) {
-        if (this.isRecording) return;
+        if (this.isRecording) {
+            // Already recording - cleanly re-arm without requiring a page refresh
+            if (this.mediaStream && this.mediaStream.active && this.audioContext && this.audioContext.state !== 'closed') {
+                this.isLiveCall = liveMode;
+                this.unmuteAndResetTurn();
+                if (this.audioContext.state === 'suspended') {
+                    try { await this.audioContext.resume(); } catch (e) {}
+                }
+                return;
+            }
+            await this.stop();
+        }
+
         this.audioData = [];
         this.isLiveCall = liveMode;
         this.hasSpokenInTurn = false;
@@ -259,9 +296,29 @@ class AudioRecorder {
         this.isRecording = true;
 
         if (this.recognition && liveMode) {
-            try {
-                this.recognition.start();
-            } catch (e) {}
+            this.restartRecognitionSafe();
+        }
+    }
+
+    unmuteAndResetTurn() {
+        this.isMuted = false;
+        this.hasSpokenInTurn = false;
+        this.lastSpeechTime = 0;
+        this.speechStartTime = null;
+        this.currentLiveTranscript = "";
+        this.audioData = [];
+        this.turnStartIndex = 0;
+        this.latestResultIndex = 0;
+        this.noiseFloor = 0.008;
+        if (this.finalTranscriptTimer) {
+            clearTimeout(this.finalTranscriptTimer);
+            this.finalTranscriptTimer = null;
+        }
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            try { this.audioContext.resume(); } catch (e) {}
+        }
+        if (this.recognition && this.isLiveCall && this.isRecording) {
+            this.restartRecognitionSafe();
         }
     }
 
@@ -282,6 +339,7 @@ class AudioRecorder {
                 try {
                     this.recognition.abort();
                 } catch (e) {}
+                this.isRecognitionActive = false;
             }
             this.turnStartIndex = 0;
             this.latestResultIndex = 0;
@@ -292,14 +350,7 @@ class AudioRecorder {
             this.latestResultIndex = 0;
             this.currentLiveTranscript = "";
             if (this.recognition && this.isLiveCall && this.isRecording) {
-                try {
-                    this.recognition.start();
-                } catch (e) {
-                    // If browser kept session running, synchronize turnStartIndex
-                    if (this.latestResultIndex !== undefined) {
-                        this.turnStartIndex = this.latestResultIndex;
-                    }
-                }
+                this.restartRecognitionSafe();
             }
         }
     }

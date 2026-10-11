@@ -187,6 +187,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (sectionGeminiSettings) sectionGeminiSettings.style.display = (mode === 'gemini') ? 'block' : 'none';
     }
 
+    function openSettingsModalForProvider(provider) {
+        setPipelineMode(provider);
+        if (settingsModal) {
+            settingsModal.classList.add('open');
+            setTimeout(() => {
+                if (provider === 'groq' && inputGroqKey) inputGroqKey.focus();
+                else if (provider === 'openai' && inputOpenAIKey) inputOpenAIKey.focus();
+                else if (provider === 'gemini' && inputGeminiKey) inputGeminiKey.focus();
+            }, 100);
+        }
+    }
+
+    function handleAuthOrKeyError(msg) {
+        const lower = (msg || '').toLowerCase();
+        if (lower.includes('api key') || lower.includes('auth') || lower.includes('not configured') || lower.includes('missing')) {
+            openSettingsModalForProvider(currentMode);
+        }
+    }
+
     async function switchProvider(mode) {
         setPipelineMode(mode);
         try {
@@ -196,8 +215,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ llm_provider: mode })
             });
             if (res.ok) {
-                showToast(`Switched active provider to ${mode.toUpperCase()}`, 'info');
-                await checkStatus();
+                const statusData = await checkStatus();
+                const providerInfo = (statusData && statusData[mode]) || (statusData && statusData.providers && statusData.providers[mode]);
+                if (providerInfo && !providerInfo.configured) {
+                    showToast(`${mode.toUpperCase()} API key is not configured. Please enter your API key to continue.`, 'warning');
+                    openSettingsModalForProvider(mode);
+                } else {
+                    showToast(`Switched active provider to ${mode.toUpperCase()}`, 'info');
+                    // Seamless hot-switch: if live call is active or listening, cleanly re-arm without refresh
+                    if (sessionState.mode === MODE_LIVE_CALL && recorder.isRecording) {
+                        recorder.unmuteAndResetTurn();
+                        setSessionStatus(STATE_LIVE_LISTENING);
+                    }
+                }
             }
         } catch (err) {
             console.warn('Failed to switch provider on backend:', err);
@@ -733,16 +763,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!response.ok || data.error) {
                 const stage = data.stage ? `[${data.stage}] ` : '';
-                showToast(`${stage}${data.message || 'Error processing audio'}`, 'error');
-                setSessionStatus(STATE_ERROR, data.message);
-                if (sessionState.mode === MODE_LIVE_CALL && recorder.isRecording) {
-                    recorder.setMuted(false);
-                    setTimeout(() => {
-                        if (sessionState.mode === MODE_LIVE_CALL && sessionState.status === STATE_ERROR) {
-                            setSessionStatus(STATE_LIVE_LISTENING);
-                        }
-                    }, 2000);
-                }
+                const errorMsg = data.message || 'Error processing audio';
+                showToast(`${stage}${errorMsg}`, 'error');
+                recorder.setMuted(false);
+                setSessionStatus(STATE_ERROR, errorMsg);
+                handleAuthOrKeyError(errorMsg);
                 return;
             }
 
@@ -752,16 +777,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (err.name === 'AbortError') return;
             if (turnId !== sessionState.turnId) return;
 
+            recorder.setMuted(false);
             showToast('Network / Server Error: ' + err.message, 'error');
             setSessionStatus(STATE_ERROR, err.message);
-            if (sessionState.mode === MODE_LIVE_CALL && recorder.isRecording) {
-                recorder.setMuted(false);
-                setTimeout(() => {
-                    if (sessionState.mode === MODE_LIVE_CALL && sessionState.status === STATE_ERROR) {
-                        setSessionStatus(STATE_LIVE_LISTENING);
-                    }
-                }, 2000);
-            }
         }
     }
 
@@ -794,8 +812,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!response.ok || data.error) {
                 const stage = data.stage ? `[${data.stage}] ` : '';
-                showToast(`${stage}${data.message || 'Error processing text'}`, 'error');
-                setSessionStatus(STATE_ERROR, data.message);
+                const errorMsg = data.message || 'Error processing text';
+                showToast(`${stage}${errorMsg}`, 'error');
+                recorder.setMuted(false);
+                setSessionStatus(STATE_ERROR, errorMsg);
+                handleAuthOrKeyError(errorMsg);
                 return;
             }
 
@@ -805,6 +826,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (err.name === 'AbortError') return;
             if (turnId !== sessionState.turnId) return;
 
+            recorder.setMuted(false);
             showToast('Network / Server Error: ' + err.message, 'error');
             setSessionStatus(STATE_ERROR, err.message);
         }
@@ -1177,6 +1199,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (inputGeminiKey) inputGeminiKey.value = '';
                 if (inputElevenKey) inputElevenKey.value = '';
                 await checkStatus();
+
+                // Seamless dynamic recovery: restore listening immediately without requiring page refresh
+                if (sessionState.mode === MODE_LIVE_CALL) {
+                    if (recorder.isRecording) {
+                        recorder.unmuteAndResetTurn();
+                        setSessionStatus(STATE_LIVE_LISTENING);
+                        startVisualizer();
+                        startInactivityTimer();
+                        showToast(`Ready! Listening with ${selectedProvider.toUpperCase()}...`, 'success');
+                    } else {
+                        setSessionStatus(STATE_IDLE);
+                    }
+                } else {
+                    setSessionStatus(STATE_IDLE);
+                }
             } else {
                 showToast('Failed to save settings.', 'error');
             }
@@ -1236,37 +1273,44 @@ document.addEventListener('DOMContentLoaded', () => {
             const activeProvider = data.llm_provider || data.mode || 'groq';
             setPipelineMode(activeProvider);
 
+            const groqInfo = data.groq || (data.providers && data.providers.groq);
+            const openaiInfo = data.openai || (data.providers && data.providers.openai);
+            const geminiInfo = data.gemini || (data.providers && data.providers.gemini);
+
             // Update badges
-            if (data.groq) updateBadge(groqStatusBadge, data.groq);
-            if (data.openai) updateBadge(openaiStatusBadge, data.openai);
-            if (data.gemini) updateBadge(geminiStatusBadge, data.gemini);
+            if (groqInfo) updateBadge(groqStatusBadge, groqInfo);
+            if (openaiInfo) updateBadge(openaiStatusBadge, openaiInfo);
+            if (geminiInfo) updateBadge(geminiStatusBadge, geminiInfo);
 
             // Populate models
-            if (data.groq && data.groq.available_models) {
-                populateSelectOptions(selectGroqModel, data.groq.available_models, data.groq.model);
+            if (groqInfo && groqInfo.available_models) {
+                populateSelectOptions(selectGroqModel, groqInfo.available_models, groqInfo.model);
             }
-            if (data.openai && data.openai.available_models) {
-                populateSelectOptions(selectOpenAIModel, data.openai.available_models, data.openai.model);
+            if (openaiInfo && openaiInfo.available_models) {
+                populateSelectOptions(selectOpenAIModel, openaiInfo.available_models, openaiInfo.model);
             }
-            if (data.gemini && data.gemini.available_models) {
-                populateSelectOptions(selectGeminiModel, data.gemini.available_models, data.gemini.model);
+            if (geminiInfo && geminiInfo.available_models) {
+                populateSelectOptions(selectGeminiModel, geminiInfo.available_models, geminiInfo.model);
             }
 
             // Update placeholders for configured keys (never exposing raw secrets)
-            if (inputGroqKey && data.groq && data.groq.configured) {
+            if (inputGroqKey && groqInfo && groqInfo.configured) {
                 inputGroqKey.placeholder = '•••••••••••••••• (Configured on server)';
             }
-            if (inputOpenAIKey && data.openai && data.openai.configured) {
+            if (inputOpenAIKey && openaiInfo && openaiInfo.configured) {
                 inputOpenAIKey.placeholder = '•••••••••••••••• (Configured on server)';
             }
-            if (inputGeminiKey && data.gemini && data.gemini.configured) {
+            if (inputGeminiKey && geminiInfo && geminiInfo.configured) {
                 inputGeminiKey.placeholder = '•••••••••••••••• (Configured on server)';
             }
             if (inputElevenKey && data.elevenlabs && data.elevenlabs.configured) {
                 inputElevenKey.placeholder = '•••••••••••••••• (Configured on server)';
             }
+
+            return data;
         } catch (e) {
             console.warn('Could not fetch status:', e);
+            return null;
         }
     }
 

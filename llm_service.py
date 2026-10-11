@@ -96,8 +96,8 @@ class GroqProvider(BaseLLMProvider):
         super().__init__(name="groq", api_key=key, model=selected_model, temperature=temperature, max_tokens=max_tokens)
 
     def _get_client(self):
-        key = self.api_key if self.api_key is not None else os.getenv("GROQ_API_KEY", "")
-        if not key or not key.strip() or key == "your_groq_api_key_here":
+        key = (self.api_key or os.getenv("GROQ_API_KEY", "")).strip()
+        if not key or key == "your_groq_api_key_here":
             raise LLMProviderError(
                 provider="groq",
                 message="Groq API key is missing. Configure GROQ_API_KEY in the backend environment or Settings.",
@@ -110,8 +110,8 @@ class GroqProvider(BaseLLMProvider):
             raise LLMProviderError(provider="groq", message="The 'groq' package is not installed.")
 
     def is_configured(self) -> bool:
-        key = self.api_key if self.api_key is not None else os.getenv("GROQ_API_KEY", "")
-        return bool(key and key.strip() and key != "your_groq_api_key_here")
+        key = (self.api_key or os.getenv("GROQ_API_KEY", "")).strip()
+        return bool(key and key != "your_groq_api_key_here")
 
     def list_available_models(self) -> List[str]:
         return self.RECOMMENDED_MODELS
@@ -244,8 +244,8 @@ class OpenAIProvider(BaseLLMProvider):
         self._verified_model: Optional[str] = None
 
     def _get_client(self):
-        key = self.api_key if self.api_key is not None else os.getenv("OPENAI_API_KEY", "")
-        if not key or not key.strip() or key == "your_openai_api_key_here":
+        key = (self.api_key or os.getenv("OPENAI_API_KEY", "")).strip()
+        if not key or key == "your_openai_api_key_here":
             raise LLMProviderError(
                 provider="openai",
                 message="OpenAI API key is missing. Configure OPENAI_API_KEY in the backend environment or Settings.",
@@ -258,8 +258,8 @@ class OpenAIProvider(BaseLLMProvider):
             raise LLMProviderError(provider="openai", message="The 'openai' package is not installed.")
 
     def is_configured(self) -> bool:
-        key = self.api_key if self.api_key is not None else os.getenv("OPENAI_API_KEY", "")
-        return bool(key and key.strip() and key != "your_openai_api_key_here")
+        key = (self.api_key or os.getenv("OPENAI_API_KEY", "")).strip()
+        return bool(key and key != "your_openai_api_key_here")
 
     def list_available_models(self) -> List[str]:
         return self.RECOMMENDED_MODELS
@@ -615,14 +615,16 @@ class UnifiedLLMManager:
         if p_name not in self.providers:
             raise LLMProviderError(provider=p_name, message=f"Unknown provider: {p_name}")
         provider = self.providers[p_name]
-        if api_key:
-            provider.api_key = api_key
+        if api_key is not None and api_key.strip():
+            clean_k = api_key.strip()
+            provider.api_key = clean_k
             env_var = f"{p_name.upper()}_API_KEY"
-            os.environ[env_var] = api_key
-        if model:
-            provider.model = model
+            os.environ[env_var] = clean_k
+        if model is not None and model.strip():
+            clean_m = model.strip()
+            provider.model = clean_m
             env_var = f"{p_name.upper()}_MODEL"
-            os.environ[env_var] = model
+            os.environ[env_var] = clean_m
         return provider
 
     def generate_response(self, prompt: str, conversation_history: Optional[List[Dict[str, str]]] = None, system_prompt: Optional[str] = None, provider_name: Optional[str] = None) -> str:
