@@ -390,7 +390,7 @@ sequenceDiagram
     
     Backend->>TTS: Synthesize Sentence 1: "I am a voice AI assistant."
     TTS-->>Backend: Binary MP3 Audio Bytes
-    Backend-->>Browser: {"type": "audio_chunk", "audio": "data:audio/mp3;base64,..."}
+    Backend-->>Browser: {"type": "audio_chunk", "audio_data": "base64_mp3..."}
     
     Note over Browser: 5. Audio Queuing & Half-Duplex Muting
     Browser->>Browser: Push to FIFO AudioQueue
@@ -399,7 +399,7 @@ sequenceDiagram
 
     Backend->>TTS: Synthesize Sentence 2: "I can answer questions..."
     TTS-->>Backend: Binary MP3 Audio Bytes
-    Backend-->>Browser: {"type": "audio_chunk", "audio": "data:audio/mp3;base64,..."}
+    Backend-->>Browser: {"type": "audio_chunk", "audio_data": "base64_mp3..."}
 
     Note over Backend,Browser: 6. Turn Finalization
     Backend-->>Browser: {"type": "response_complete", "full_text": "..."}
