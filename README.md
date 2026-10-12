@@ -17,8 +17,8 @@ The **Voice AI Pipeline** is a modular, low-latency conversational voice agent e
 
 | Item | Details |
 | :--- | :--- |
-| **Live Application Demo** | [LIVE DEMO: Production Application URL](https://voice-ai-agent.onrender.com) *(Render PaaS)* |
-| **GitHub Repository** | [https://github.com/aman-singh-12/Testing-AI](https://github.com/aman-singh-12/Testing-AI) |
+| **Live Application Demo** | [Live Deployed Application](https://ai-voice-asistent.onrender.com/) *(Render PaaS)* |
+| **GitHub Repository** | [https://github.com/aman-singh-12/AI_Voice_Agent](https://github.com/aman-singh-12/AI_Voice_Agent) |
 | **Core Tech Stack** | Vanilla JS, FastAPI, Uvicorn, WebSockets, Groq LPU, ElevenLabs, edge-tts |
 | **Deployment Platform** | Render (`render.yaml` — Python Web Service on port 8001) |
 | **Interactive API Docs** | `http://localhost:8001/docs` (FastAPI Swagger UI) |
@@ -609,8 +609,8 @@ testing AI/
 
 #### 1. Clone the Repository
 ```bash
-git clone https://github.com/aman-singh-12/Testing-AI.git
-cd "Testing-AI"
+git clone https://github.com/aman-singh-12/AI_Voice_Agent.git
+cd "AI_Voice_Agent"
 ```
 
 #### 2. Create and Activate a Virtual Environment
