@@ -582,7 +582,6 @@ testing AI/
 │   ├── PRD.md                 # Product Requirements Document
 │   ├── HLD.md                 # High-Level Design specification
 │   ├── LLD.md                 # Low-Level Design specification
-│   ├── INTERVIEW_OVERVIEW.md  # Executive briefing and cheat sheet for technical interviewers
 │   └── assets/                # Application screenshots and visual architecture diagrams
 │
 ├── CHALLENGES_AND_DIFFICULTIES.md  # Comprehensive historical development and debugging log
@@ -706,7 +705,6 @@ For deeper architectural analyses, system diagrams, and interview preparation ma
 - 📋 **[Product Requirements Document (PRD)](docs/PRD.md):** Business objectives, user personas, functional and non-functional requirements.
 - 🏛️ **[High-Level Design (HLD)](docs/HLD.md):** Architectural boundaries, component topologies, and data flows.
 - ⚙️ **[Low-Level Design (LLD)](docs/LLD.md):** Module-level design, class schemas, threading models, and WebSocket protocols.
-- 🎯 **[Interviewer-Friendly Project Overview](docs/INTERVIEW_OVERVIEW.md):** 5-minute technical briefing and architecture summary.
 - 🛠️ **[Challenges and Difficulties](CHALLENGES_AND_DIFFICULTIES.md):** Detailed analysis of real development hurdles, root causes, and solutions.
 - 🔍 **[Technical Project Audit](PROJECT_COMPLETE_TECHNICAL_AUDIT.md):** 18-part code audit with line-by-line verification against the implementation.
 
