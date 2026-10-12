@@ -18,6 +18,7 @@ class AudioRecorder {
         this.onVolumeChange = null;
         this.onSpeechStart = null;
         this.onSpeechTranscript = null; // High-speed instant transcribed text (0ms STT latency)
+        this.onPartialTranscript = null; // Real-time progressive transcription callback
         this.onSilenceDetected = null;  // WAV fallback
 
         // High-Speed Adaptive VAD Parameters
@@ -35,6 +36,8 @@ class AudioRecorder {
         this.turnStartIndex = 0;
         this.latestResultIndex = 0;
         this.currentLiveTranscript = "";
+        this.currentFinalTranscript = "";
+        this.currentInterimTranscript = "";
         this.isRecognitionActive = false;
         this.hasNativeSpeechRecognition = ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
         this.initSpeechRecognition();
@@ -74,15 +77,34 @@ class AudioRecorder {
 
                 const startIndex = Math.max(0, this.turnStartIndex || 0);
                 for (let i = startIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        fullFinal += event.results[i][0].transcript + ' ';
+                    const result = event.results[i];
+                    if (!result || !result[0]) continue;
+                    const piece = result[0].transcript || '';
+                    if (result.isFinal) {
+                        if (fullFinal && !fullFinal.endsWith(' ') && !piece.startsWith(' ')) {
+                            fullFinal += ' ';
+                        }
+                        fullFinal += piece;
                         hasFinalChunk = true;
                     } else {
-                        interim += event.results[i][0].transcript;
+                        if (interim && !interim.endsWith(' ') && !piece.startsWith(' ')) {
+                            interim += ' ';
+                        }
+                        interim += piece;
                     }
                 }
 
-                const currentText = (fullFinal + interim).trim();
+                const cleanFinal = fullFinal.trim();
+                const cleanInterim = interim.trim();
+                let currentText = cleanFinal;
+                if (cleanInterim) {
+                    currentText = cleanFinal ? `${cleanFinal} ${cleanInterim}` : cleanInterim;
+                }
+                currentText = currentText.trim();
+
+                this.currentFinalTranscript = cleanFinal;
+                this.currentInterimTranscript = cleanInterim;
+
                 if (currentText) {
                     this.currentLiveTranscript = currentText;
                     this.lastSpeechTime = Date.now();
@@ -90,6 +112,15 @@ class AudioRecorder {
                         this.hasSpokenInTurn = true;
                         this.speechStartTime = Date.now();
                         if (this.onSpeechStart) this.onSpeechStart();
+                    }
+
+                    // Expose progressive partial transcript to UI
+                    if (this.onPartialTranscript && !this.isMuted) {
+                        this.onPartialTranscript(currentText, {
+                            final: cleanFinal,
+                            interim: cleanInterim,
+                            isFinalChunk: hasFinalChunk
+                        });
                     }
 
                     // If a final sentence was recognized, schedule a quick turn trigger
@@ -138,6 +169,8 @@ class AudioRecorder {
         this.turnStartIndex = 0;
         this.latestResultIndex = 0;
         this.currentLiveTranscript = "";
+        this.currentFinalTranscript = "";
+        this.currentInterimTranscript = "";
         if (this.isRecognitionActive) {
             try { this.recognition.abort(); } catch (e) {}
             this.isRecognitionActive = false;
@@ -175,6 +208,8 @@ class AudioRecorder {
         this.hasSpokenInTurn = false;
         this.lastSpeechTime = 0;
         this.currentLiveTranscript = "";
+        this.currentFinalTranscript = "";
+        this.currentInterimTranscript = "";
         this.audioData = [];
 
         if (transcriptToSend && this.onSpeechTranscript) {
@@ -204,6 +239,8 @@ class AudioRecorder {
         this.lastSpeechTime = 0;
         this.speechStartTime = null;
         this.currentLiveTranscript = "";
+        this.currentFinalTranscript = "";
+        this.currentInterimTranscript = "";
         this.turnStartIndex = 0;
         this.latestResultIndex = 0;
         this.isMuted = false;
@@ -306,6 +343,8 @@ class AudioRecorder {
         this.lastSpeechTime = 0;
         this.speechStartTime = null;
         this.currentLiveTranscript = "";
+        this.currentFinalTranscript = "";
+        this.currentInterimTranscript = "";
         this.audioData = [];
         this.turnStartIndex = 0;
         this.latestResultIndex = 0;
@@ -327,6 +366,8 @@ class AudioRecorder {
         this.hasSpokenInTurn = false;
         this.lastSpeechTime = 0;
         this.currentLiveTranscript = "";
+        this.currentFinalTranscript = "";
+        this.currentInterimTranscript = "";
         this.audioData = [];
         if (this.finalTranscriptTimer) {
             clearTimeout(this.finalTranscriptTimer);
@@ -349,6 +390,8 @@ class AudioRecorder {
             this.turnStartIndex = 0;
             this.latestResultIndex = 0;
             this.currentLiveTranscript = "";
+            this.currentFinalTranscript = "";
+            this.currentInterimTranscript = "";
             if (this.recognition && this.isLiveCall && this.isRecording) {
                 this.restartRecognitionSafe();
             }
@@ -388,6 +431,8 @@ class AudioRecorder {
         this.turnStartIndex = 0;
         this.latestResultIndex = 0;
         this.currentLiveTranscript = "";
+        this.currentFinalTranscript = "";
+        this.currentInterimTranscript = "";
         if (this.processor) {
             this.processor.disconnect();
             this.processor = null;

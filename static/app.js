@@ -122,6 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Active Turn Streaming State
     let activeTurnId = 0;
     let activeTurnUserText = '';
+    let activeUserBubble = null;
     let activeAssistantBubble = null;
     let activeAssistantText = '';
     let audioQueue = [];
@@ -491,6 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         clearInactivityTimer();
         stopVisualizer();
+        cancelUserBubble();
 
         audioQueue = [];
         isPlayingQueue = false;
@@ -544,7 +546,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Instant transcript path (< 50ms) for Live Call
+    // Progressive real-time transcription updates while user is speaking
+    recorder.onPartialTranscript = (text, metadata) => {
+        if (sessionState.mode !== MODE_LIVE_CALL) return;
+        if (recorder.isMuted) return;
+        if (sessionState.status === STATE_PROCESSING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_STOPPING) return;
+        if (!text || !text.trim()) return;
+
+        clearInactivityTimer();
+        if (sessionState.status === STATE_LIVE_LISTENING) {
+            setSessionStatus(STATE_RECORDING);
+        }
+        updateOrCreateUserBubble(text, metadata);
+    };
+
+    // Instant transcript path (< 50ms) for Live Call final utterance
     recorder.onSpeechTranscript = async (text) => {
         clearInactivityTimer();
         if (sessionState.mode === MODE_LIVE_CALL && !isProcessing && !isSpeaking && text) {
@@ -556,6 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Audio blob fallback path for Live Call
     recorder.onSilenceDetected = async (wavBlob) => {
         clearInactivityTimer();
+        cancelUserBubble();
         if (sessionState.mode === MODE_LIVE_CALL && !isProcessing && !isSpeaking && wavBlob) {
             recorder.setMuted(true);
             await processAudio(wavBlob);
@@ -1004,7 +1021,11 @@ document.addEventListener('DOMContentLoaded', () => {
         sessionState.abortController = new AbortController();
 
         setSessionStatus(STATE_PROCESSING);
-        appendUserMessage(text.trim());
+        if (activeUserBubble) {
+            finalizeUserBubble(text.trim());
+        } else {
+            appendUserMessage(text.trim());
+        }
 
         // Check if WebSocket is open and connected for fast real-time streaming
         if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
@@ -1078,7 +1099,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (appendUser && data.user_text) {
-            appendUserMessage(data.user_text);
+            if (activeUserBubble) {
+                finalizeUserBubble(data.user_text);
+            } else {
+                appendUserMessage(data.user_text);
+            }
         }
         
         appendAssistantMessage(data.assistant_text, data.audio_url, data.metrics);
@@ -1159,7 +1184,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ----------------------------------------------------
-    // Transcript Rendering
+    // Transcript Rendering & Progressive User Transcription
     // ----------------------------------------------------
     function appendUserMessage(text) {
         if (emptyState) emptyState.style.display = 'none';
@@ -1167,14 +1192,97 @@ document.addEventListener('DOMContentLoaded', () => {
         const bubble = document.createElement('div');
         bubble.className = 'chat-bubble user';
         bubble.innerHTML = `
-            <div>${escapeHtml(text)}</div>
+            <div class="user-text-content">${escapeHtml(text)}</div>
             <div class="bubble-meta">
                 <span>You</span>
-                <span>${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span class="user-bubble-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
             </div>
         `;
         chatHistory.appendChild(bubble);
         chatHistory.scrollTop = chatHistory.scrollHeight;
+        return bubble;
+    }
+
+    function updateOrCreateUserBubble(text, metadata) {
+        if (!text || !text.trim()) return null;
+        if (emptyState) emptyState.style.display = 'none';
+
+        if (!activeUserBubble || !activeUserBubble.isConnected) {
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-bubble user interim-bubble';
+            bubble.innerHTML = `
+                <div class="user-text-content"></div>
+                <div class="bubble-meta">
+                    <span>You</span>
+                    <span class="user-bubble-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+            `;
+            chatHistory.appendChild(bubble);
+            activeUserBubble = bubble;
+        }
+
+        const contentEl = activeUserBubble.querySelector('.user-text-content');
+        if (contentEl) {
+            const finalPart = (metadata && typeof metadata.final === 'string') ? metadata.final : '';
+            const interimPart = (metadata && typeof metadata.interim === 'string') ? metadata.interim : '';
+
+            let html = '';
+            if (finalPart) {
+                html += `<span class="final-text">${escapeHtml(finalPart)}</span>`;
+            }
+            if (interimPart) {
+                if (finalPart) html += ' ';
+                html += `<span class="interim-text">${escapeHtml(interimPart)}</span>`;
+            }
+            if (!finalPart && !interimPart && text) {
+                html += `<span class="interim-text">${escapeHtml(text)}</span>`;
+            }
+
+            // Subtle listening indicator
+            html += ` <span class="listening-indicator" aria-label="Listening"><span class="listening-dot"></span></span>`;
+            contentEl.innerHTML = html;
+        }
+
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+        return activeUserBubble;
+    }
+
+    function finalizeUserBubble(finalText) {
+        if (!activeUserBubble) return null;
+
+        activeUserBubble.classList.remove('interim-bubble');
+        const contentEl = activeUserBubble.querySelector('.user-text-content');
+        if (contentEl) {
+            contentEl.innerHTML = escapeHtml(finalText);
+        }
+        const timeEl = activeUserBubble.querySelector('.user-bubble-time');
+        if (timeEl) {
+            timeEl.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        const finalizedBubble = activeUserBubble;
+        activeUserBubble = null;
+        return finalizedBubble;
+    }
+
+    function cancelUserBubble() {
+        if (activeUserBubble) {
+            const contentEl = activeUserBubble.querySelector('.user-text-content');
+            const hasText = contentEl && contentEl.innerText.trim();
+            if (!hasText) {
+                activeUserBubble.remove();
+                if (emptyState && chatHistory.children.length === 0) {
+                    emptyState.style.display = 'flex';
+                }
+            } else {
+                activeUserBubble.classList.remove('interim-bubble');
+                const indicator = activeUserBubble.querySelector('.listening-indicator');
+                if (indicator) indicator.remove();
+                const interimSpan = activeUserBubble.querySelector('.interim-text');
+                if (interimSpan) interimSpan.classList.remove('interim-text');
+            }
+            activeUserBubble = null;
+        }
     }
 
     function appendAssistantMessage(text, audioUrl, metrics) {
@@ -1200,6 +1308,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function clearChat() {
         conversationHistory = [];
+        activeUserBubble = null;
         chatHistory.innerHTML = '';
         if (emptyState) {
             chatHistory.appendChild(emptyState);
