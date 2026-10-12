@@ -69,7 +69,7 @@ GROQ_MODEL=qwen/qwen3.8-27b
 ```
 
 Open your browser at:
-👉 **[http://localhost:8001](http://localhost:8001)**
+👉 **[Live deployed link](https://ai-voice-asistent.onrender.com/)**
 
 ---
 
