@@ -87,6 +87,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectElevenVoice = document.getElementById('selectElevenVoice');
     const selectLocalVoice = document.getElementById('selectLocalVoice');
     const selectSilenceDuration = document.getElementById('selectSilenceDuration');
+    const selectBargeIn = document.getElementById('selectBargeIn');
+
+    // External Microphone Isolation & Device Selection DOM Elements
+    const selectMicDevice = document.getElementById('selectMicDevice');
+    const btnRefreshMics = document.getElementById('btnRefreshMics');
+    const micStatusBadge = document.getElementById('micStatusBadge');
+    const selectedDeviceNameText = document.getElementById('selectedDeviceNameText');
+    const bargeInStatusBadge = document.getElementById('bargeInStatusBadge');
+    const headerMicPill = document.getElementById('headerMicPill');
+    const headerMicDot = document.getElementById('headerMicDot');
+    const headerMicLabel = document.getElementById('headerMicLabel');
 
     // Toast
     const toastContainer = document.getElementById('toastContainer');
@@ -97,18 +108,33 @@ document.addEventListener('DOMContentLoaded', () => {
     const MODE_LIVE_CALL = 'live_call';
     const MODE_CLICK_TO_TALK = 'click_to_talk';
 
+    // ----------------------------------------------------
+    // Formal State Machine Definitions (Section 11)
+    // ----------------------------------------------------
     const STATE_IDLE = 'idle';
-    const STATE_LIVE_LISTENING = 'live_listening';
-    const STATE_RECORDING = 'recording';
+    const STATE_LISTENING = 'listening';
+    const STATE_USER_SPEAKING = 'user_speaking';
     const STATE_PROCESSING = 'processing';
-    const STATE_SPEAKING = 'speaking';
+    const STATE_AI_SPEAKING = 'ai_speaking';
+    const STATE_INTERRUPTING = 'interrupting';
     const STATE_STOPPING = 'stopping';
     const STATE_ERROR = 'error';
+    const STATE_EXTERNAL_MIC_DISCONNECTED = 'external_mic_disconnected';
+
+    // Backward compatibility aliases for DOM styling and legacy bindings
+    const STATE_LIVE_LISTENING = STATE_LISTENING;
+    const STATE_RECORDING = STATE_USER_SPEAKING;
+    const STATE_SPEAKING = STATE_AI_SPEAKING;
+
+    // Unique Request ID Generator for Full-Duplex Session Tracking
+    function generateRequestId() {
+        return 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+    }
 
     // Centralized interaction state
     const sessionState = {
         mode: MODE_LIVE_CALL,     // 'live_call' | 'click_to_talk'
-        status: STATE_IDLE,       // 'idle' | 'live_listening' | 'recording' | 'processing' | 'speaking' | 'stopping' | 'error'
+        status: STATE_IDLE,       // 'idle' | 'listening' | 'user_speaking' | 'processing' | 'ai_speaking' | 'interrupting' | 'stopping' | 'error'
         turnId: 0,
         abortController: null,
         errorMessage: ''
@@ -127,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let wsReconnectTimer = null;
 
     // Active Turn Streaming State
-    let activeTurnId = 0;
+    let activeTurnId = '';
     let activeTurnUserText = '';
     let activeUserBubble = null;
     let activeAssistantBubble = null;
@@ -135,6 +161,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let audioQueue = [];
     let isPlayingQueue = false;
     let isTurnResponseComplete = false;
+    let audioPlaybackGeneration = 0;
+    const interruptedTurnIds = new Set();
 
     // Legacy sync flags
     let isLiveCallActive = false;
@@ -282,6 +310,24 @@ document.addEventListener('DOMContentLoaded', () => {
             recorder.setSilenceDuration(ms);
             localStorage.setItem('voice_silence_ms', ms);
             showToast(`Pause delay set to ${(ms/1000).toFixed(1)}s`, 'info');
+        });
+    }
+
+    // Speech interruption (barge-in) listener
+    if (selectBargeIn) {
+        const savedBargeIn = localStorage.getItem('voice_barge_in');
+        if (savedBargeIn) {
+            selectBargeIn.value = savedBargeIn;
+            recorder.setBargeInEnabled(savedBargeIn === 'enabled');
+        } else {
+            recorder.setBargeInEnabled(true);
+        }
+
+        selectBargeIn.addEventListener('change', (e) => {
+            const enabled = e.target.value === 'enabled';
+            recorder.setBargeInEnabled(enabled);
+            localStorage.setItem('voice_barge_in', e.target.value);
+            showToast(`Speech interruption ${enabled ? 'enabled' : 'disabled'}`, 'info');
         });
     }
 
@@ -451,9 +497,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         : 'Playing audio response';
                     break;
 
+                case STATE_INTERRUPTING:
+                    statusHeading.innerText = 'Interrupting...';
+                    statusSubtext.innerText = 'Cancelling old response and prioritizing your new speech';
+                    break;
+
                 case STATE_STOPPING:
                     statusHeading.innerText = 'Ending session...';
                     statusSubtext.innerText = 'Wrapping up connection';
+                    break;
+
+                case STATE_EXTERNAL_MIC_DISCONNECTED:
+                    statusHeading.innerText = 'Microphone Disconnected';
+                    statusSubtext.innerText = 'Selected external microphone disconnected. Reconnect or reselect in Settings.';
                     break;
 
                 case STATE_ERROR:
@@ -501,17 +557,8 @@ document.addEventListener('DOMContentLoaded', () => {
         stopVisualizer();
         cancelUserBubble();
 
-        audioQueue = [];
-        isPlayingQueue = false;
         activeTurnId = sessionState.turnId;
-
-        if (currentAudio) {
-            try {
-                currentAudio.pause();
-                currentAudio.currentTime = 0;
-            } catch (e) {}
-            currentAudio = null;
-        }
+        interruptAssistantPlayback('session_cleanup');
 
         if (recorder && recorder.isRecording) {
             try {
@@ -536,7 +583,132 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ----------------------------------------------------
-    // Audio Recorder Callbacks
+    // Speech Interruption (Barge-in) & Acoustic Echo Isolation
+    // ----------------------------------------------------
+    function isEchoOfAi(candidateText, aiText) {
+        if (!candidateText || !aiText) return false;
+        const cleanCandidate = candidateText.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+        const cleanAi = aiText.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+        if (!cleanCandidate || !cleanAi) return false;
+
+        const candidateWords = cleanCandidate.split(/\s+/).filter(Boolean);
+        if (candidateWords.length === 0) return false;
+
+        const aiWordsList = cleanAi.split(/\s+/).filter(Boolean);
+        const aiWordsSet = new Set(aiWordsList);
+
+        // If candidate is a single common stopword present in AI speech, filter as acoustic feedback
+        const commonStopwords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'it', 'its', 'you', 'your', 'i', 'my', 'we', 'our', 'and', 'or', 'but', 'hello', 'hi']);
+        if (candidateWords.length === 1 && commonStopwords.has(candidateWords[0]) && aiWordsSet.has(candidateWords[0])) {
+            return true;
+        }
+
+        // Direct phrase match: speaker sound picked up word-for-word
+        if (candidateWords.length >= 2 && cleanAi.includes(cleanCandidate)) {
+            return true;
+        }
+
+        // High overlap ratio indicates speaker audio leaking into microphone
+        let matched = 0;
+        for (const w of candidateWords) {
+            if (aiWordsSet.has(w)) matched++;
+        }
+        const overlap = matched / candidateWords.length;
+        return overlap >= 0.65;
+    }
+
+    function interruptAssistantPlayback(reason = 'user_barge_in') {
+        audioPlaybackGeneration++;
+        if (currentAudio) {
+            try {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+            } catch (e) {
+                console.warn(`[AUDIO] Failed to stop active playback (${reason}):`, e);
+            }
+            currentAudio = null;
+        }
+        audioQueue = [];
+        isPlayingQueue = false;
+        isSpeaking = false;
+        isTurnResponseComplete = false;
+        recorder.setAiSpeaking(false);
+        if (nodeTTS) nodeTTS.classList.remove('active');
+        console.log(`[AUDIO] Assistant playback interrupted (${reason}); generation=${audioPlaybackGeneration}`);
+    }
+
+    function handleBargeIn(source = 'speech', initialText = '') {
+        // Strict Hardware Isolation Check: Only the explicitly selected external mic can interrupt
+        if (!recorder.isExternalMicActive()) {
+            console.warn(`[BARGE-IN] Interruption rejected: Selected external microphone is not active. Internal microphone exclusion enforced. (source=${source})`);
+            return;
+        }
+
+        const interruptedId = activeTurnId;
+        console.log(`[BARGE-IN] External microphone interruption confirmed via ${source} for request_id=${interruptedId}:`, initialText || '(vocal interruption)');
+
+        // Stop playback before invalidating the turn so no stale audio can resume.
+        interruptAssistantPlayback('user_barge_in');
+
+        // 3. Mark the active assistant bubble with [Interrupted]
+        if (activeAssistantBubble) {
+            const contentEl = activeAssistantBubble.querySelector('.assistant-text-content');
+            if (contentEl && !contentEl.querySelector('.interrupted-tag')) {
+                const tag = document.createElement('span');
+                tag.className = 'interrupted-tag';
+                tag.textContent = ' [Interrupted]';
+                contentEl.appendChild(tag);
+            }
+        }
+
+        // 4. Conversation History Management (Section 9 & 14):
+        // Discard incomplete assistant response! Never save interrupted partial response as a completed message.
+        activeAssistantText = '';
+        activeAssistantBubble = null;
+        activeTurnUserText = null;
+
+        // 5. Notify backend to cancel the running LLM & TTS tasks immediately
+        if (interruptedId) {
+            interruptedTurnIds.add(interruptedId);
+            if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+                console.log(`[WS] Interrupt event sent for request_id=${interruptedId}`);
+                voiceWs.send(JSON.stringify({
+                    type: 'interrupt',
+                    request_id: interruptedId,
+                    turn_id: interruptedId,
+                    reason: 'user_barge_in'
+                }));
+            }
+            console.log(`[LLM] Previous generation cancelled for request_id=${interruptedId}`);
+            console.log(`[TTS] Previous TTS task cancelled or invalidated for request_id=${interruptedId}`);
+            console.log(`[SESSION] Previous response invalidated for request_id=${interruptedId}`);
+        }
+
+        // 6. Abort any in-flight REST fetch if active
+        if (sessionState.abortController) {
+            try { sessionState.abortController.abort(); } catch (e) {}
+            sessionState.abortController = null;
+        }
+
+        // 7. Transition state machine: AI_SPEAKING/PROCESSING -> INTERRUPTING -> USER_SPEAKING
+        recorder.prepareForNextSpeech();
+        isProcessing = false;
+        clearInactivityTimer();
+
+        if (sessionState.mode === MODE_LIVE_CALL) {
+            setSessionStatus(STATE_USER_SPEAKING);
+            if (statusHeading) statusHeading.innerText = 'Listening to your query...';
+        }
+
+        if (initialText) {
+            updateOrCreateUserBubble(initialText, { interim: initialText });
+        } else if (!recorder.hasNativeSpeechRecognition) {
+            updateOrCreateUserBubble('Listening...', { interim: 'Listening...' });
+        }
+    }
+
+    // ----------------------------------------------------
+    // Audio Recorder Callbacks & Event Bindings
     // ----------------------------------------------------
     recorder.onVolumeChange = (vol) => {
         if (!recorder.isRecording || recorder.isMuted) return;
@@ -546,10 +718,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    recorder.onBargeIn = (source, text) => {
+        if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || currentAudio) {
+            handleBargeIn(source, text);
+        }
+    };
+
     recorder.onSpeechStart = () => {
         clearInactivityTimer();
-        if (sessionState.mode === MODE_LIVE_CALL && sessionState.status === STATE_LIVE_LISTENING) {
-            setSessionStatus(STATE_RECORDING);
+        console.log(`[VOICE] Speech start detected on external mic. Status=${sessionState.status}`);
+        if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || currentAudio) {
+            // Strict check: Only external mic VAD can trigger interruption
+            if (!recorder.isExternalMicActive()) {
+                console.warn('[BARGE-IN] Speech start rejected: External microphone inactive, internal mic rejection enforced.');
+                return;
+            }
+            handleBargeIn(sessionState.status === STATE_PROCESSING ? 'llm_generation_interruption' : 'speech_start');
+            return;
+        }
+        if (sessionState.mode === MODE_LIVE_CALL && (sessionState.status === STATE_LISTENING || sessionState.status === STATE_LIVE_LISTENING)) {
+            setSessionStatus(STATE_USER_SPEAKING);
+            if (!recorder.hasNativeSpeechRecognition) {
+                updateOrCreateUserBubble('Listening...', { interim: 'Listening...' });
+            }
         }
     };
 
@@ -557,12 +748,29 @@ document.addEventListener('DOMContentLoaded', () => {
     recorder.onPartialTranscript = (text, metadata) => {
         if (sessionState.mode !== MODE_LIVE_CALL) return;
         if (recorder.isMuted) return;
-        if (sessionState.status === STATE_PROCESSING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_STOPPING) return;
         if (!text || !text.trim()) return;
 
+        // If AI is speaking or LLM is processing: enforce external mic VAD authorization
+        if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || (metadata && metadata.isAiSpeaking)) {
+            // Native speech recognition in browser uses OS default mic (laptop internal mic).
+            // It MUST NOT trigger barge-in unless external mic VAD actively confirmed speech!
+            if (!recorder.isExternalMicActive() || !recorder.hasSpokenInTurn) {
+                console.log('[BARGE-IN] Partial transcript ignored during AI playback: External mic VAD has not confirmed speech. Internal mic audio excluded.');
+                return;
+            }
+            if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || isSpeaking) {
+                if (isEchoOfAi(text, activeAssistantText)) {
+                    console.log('[Echo Guard] Ignored acoustic echo leak:', text);
+                    return;
+                }
+            }
+            // Genuine human interruption confirmed on external microphone!
+            handleBargeIn('partial_transcript', text);
+        }
+
         clearInactivityTimer();
-        if (sessionState.status === STATE_LIVE_LISTENING) {
-            setSessionStatus(STATE_RECORDING);
+        if (sessionState.status === STATE_LISTENING || sessionState.status === STATE_LIVE_LISTENING) {
+            setSessionStatus(STATE_USER_SPEAKING);
         }
         updateOrCreateUserBubble(text, metadata);
     };
@@ -570,18 +778,42 @@ document.addEventListener('DOMContentLoaded', () => {
     // Instant transcript path (< 50ms) for Live Call final utterance
     recorder.onSpeechTranscript = async (text) => {
         clearInactivityTimer();
-        if (sessionState.mode === MODE_LIVE_CALL && !isProcessing && !isSpeaking && text) {
-            recorder.setMuted(true);
+        if (!text || !text.trim()) return;
+        console.log(`[STT] User utterance finalized on external mic: "${text}"`);
+
+        if (sessionState.mode === MODE_LIVE_CALL) {
+            if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || currentAudio) {
+                if (!recorder.isExternalMicActive() || !recorder.hasSpokenInTurn) {
+                    console.log('[BARGE-IN] Final transcript ignored during AI playback: External mic VAD has not confirmed speech. Internal mic audio excluded.');
+                    return;
+                }
+                if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || isSpeaking) {
+                    if (isEchoOfAi(text, activeAssistantText)) {
+                        console.log('[Echo Guard] Dropped final transcript matching AI echo:', text);
+                        return;
+                    }
+                }
+                handleBargeIn('speech_final', text);
+            }
+            // Continuous capture: Prepare buffer for the next utterance without muting the mic
+            recorder.prepareForNextSpeech();
             await processText(text);
         }
     };
 
-    // Audio blob fallback path for Live Call
+    // Audio blob fallback path for Live Call (Firefox, Safari, Edge, mobile)
     recorder.onSilenceDetected = async (wavBlob) => {
         clearInactivityTimer();
-        cancelUserBubble();
-        if (sessionState.mode === MODE_LIVE_CALL && !isProcessing && !isSpeaking && wavBlob) {
-            recorder.setMuted(true);
+        if (sessionState.mode === MODE_LIVE_CALL && wavBlob) {
+            if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || currentAudio) {
+                if (!recorder.isExternalMicActive() || !recorder.hasSpokenInTurn) {
+                    console.log('[BARGE-IN] WAV blob ignored during AI playback: External mic VAD has not confirmed speech. Internal mic audio excluded.');
+                    return;
+                }
+                handleBargeIn('silence_final');
+            }
+            // Continuous capture: Prepare buffer without muting the mic
+            recorder.prepareForNextSpeech();
             await processAudio(wavBlob);
         }
     };
@@ -634,8 +866,31 @@ document.addEventListener('DOMContentLoaded', () => {
     // Shared Recording & Call Lifecycle Operations
     // ----------------------------------------------------
 
+    // Safari & Mobile Audio Unlocker for Cross-Browser Auto-Play Support
+    function unlockAudio() {
+        try {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (AudioContextClass) {
+                if (!window.__unlockedAudioCtx) {
+                    window.__unlockedAudioCtx = new AudioContextClass();
+                }
+                if (window.__unlockedAudioCtx.state === 'suspended') {
+                    window.__unlockedAudioCtx.resume();
+                }
+            }
+            if (!window.__silentAudioUnlocked) {
+                const dummy = new Audio();
+                dummy.src = 'data:audio/wav;base64,UklGRigAAABXQVZFRm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+                dummy.volume = 0.01;
+                dummy.play().catch(() => {});
+                window.__silentAudioUnlocked = true;
+            }
+        } catch (e) {}
+    }
+
     // --- Live Call ---
     async function startLiveCall() {
+        unlockAudio();
         if (sessionState.mode !== MODE_LIVE_CALL) return;
         if (sessionState.status !== STATE_IDLE && sessionState.status !== STATE_ERROR) return;
 
@@ -669,6 +924,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Click to Talk (Unified Single Session) ---
     async function startClickToTalkRecording() {
+        unlockAudio();
         if (sessionState.mode !== MODE_CLICK_TO_TALK) return;
         if (sessionState.status !== STATE_IDLE && sessionState.status !== STATE_ERROR) return;
 
@@ -714,6 +970,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Unified Action Handlers (Button & Orb Call the Exact Same Functions)
     // ----------------------------------------------------
     async function handlePrimaryActionClick() {
+        unlockAudio();
         if (sessionState.mode === MODE_LIVE_CALL) {
             if (sessionState.status === STATE_IDLE || sessionState.status === STATE_ERROR) {
                 await startLiveCall();
@@ -726,12 +983,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 await startClickToTalkRecording();
             } else if (sessionState.status === STATE_RECORDING) {
                 await stopClickToTalkRecording();
+            } else if (sessionState.status === STATE_SPEAKING) {
+                handleBargeIn('button_click');
+                await startClickToTalkRecording();
             }
-            // During processing / speaking, clicks are ignored safely
         }
     }
 
     async function handleOrbClick() {
+        unlockAudio();
         if (sessionState.mode === MODE_LIVE_CALL) {
             if (sessionState.status === STATE_IDLE || sessionState.status === STATE_ERROR) {
                 await startLiveCall();
@@ -744,8 +1004,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 await startClickToTalkRecording();
             } else if (sessionState.status === STATE_RECORDING) {
                 await stopClickToTalkRecording();
+            } else if (sessionState.status === STATE_SPEAKING) {
+                handleBargeIn('orb_click');
+                await startClickToTalkRecording();
             }
-            // During processing / speaking, clicks are ignored safely
         }
     }
 
@@ -828,17 +1090,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleWebSocketMessage(data) {
         const msgType = data.type;
-        const turnId = data.turn_id;
+        const reqId = data.request_id || data.turn_id;
 
         if (msgType === 'pong' || msgType === 'config_ack') return;
 
-        // Guard against stale turns
-        if (turnId && turnId !== activeTurnId) return;
+        if (msgType === 'interrupted' || msgType === 'interrupt_ack') {
+            console.log(`[BACKEND] Interruption confirmed by server request_id=${reqId}`);
+            return;
+        }
+
+        // Guard against stale turns and interrupted turns
+        if (reqId && (reqId !== activeTurnId || interruptedTurnIds.has(reqId))) {
+            console.debug(`[SESSION] Stale or interrupted response discarded request_id=${reqId} active=${activeTurnId}`);
+            return;
+        }
+
+        if (msgType === 'transcript') {
+            const transcriptText = (data.text || '').trim();
+            console.log(`[STT] New user transcript received request_id=${reqId}: "${transcriptText}"`);
+            if (transcriptText) {
+                activeTurnUserText = transcriptText;
+                if (activeUserBubble) {
+                    finalizeUserBubble(transcriptText);
+                } else {
+                    appendUserMessage(transcriptText);
+                }
+            }
+            if (nodeSTT) nodeSTT.classList.remove('active');
+            if (nodeLLM) nodeLLM.classList.add('active');
+            return;
+        }
+
+        if (msgType === 'no_speech') {
+            if (nodeSTT) nodeSTT.classList.remove('active');
+            cancelUserBubble();
+            if (sessionState.mode === MODE_LIVE_CALL) {
+                recorder.setMuted(false);
+                recorder.setAiSpeaking(false);
+                recorder.prepareForNextSpeech();
+                setSessionStatus(STATE_LISTENING);
+                startInactivityTimer();
+            } else {
+                showToast('No speech detected. Please speak clearly into your microphone.', 'info');
+                setSessionStatus(STATE_IDLE);
+            }
+            return;
+        }
 
         if (msgType === 'llm_start') {
             setSessionStatus(STATE_PROCESSING);
             if (nodeLLM) nodeLLM.classList.add('active');
-        } else if (msgType === 'text_chunk') {
+            console.log(`[LLM] Response generation started request_id=${reqId}`);
+        } else if (msgType === 'text_chunk' || msgType === 'llm_token' || msgType === 'llm_chunk') {
+            if (msgType === 'llm_chunk' || msgType === 'llm_token') {
+                // Ignore duplicates if text_chunk is already handled
+                if (data.type !== 'text_chunk') return;
+            }
             // Progressive text delivery
             if (!activeAssistantBubble) {
                 activeAssistantBubble = createStreamingAssistantBubble();
@@ -850,13 +1157,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 contentEl.innerText = activeAssistantText;
             }
             chatHistory.scrollTop = chatHistory.scrollHeight;
-        } else if (msgType === 'audio_chunk') {
+        } else if (msgType === 'audio_chunk' || msgType === 'tts_audio_chunk') {
+            if (msgType === 'tts_audio_chunk') return; // Prevent duplicate queuing with audio_chunk
             // Incremental audio delivery
             if (data.audio_data) {
                 const segIndex = typeof data.segment_index === 'number' ? data.segment_index : audioQueue.length;
                 const audioUrl = `data:audio/mp3;base64,${data.audio_data}`;
                 const segment = {
-                    turnId: data.turn_id,
+                    turnId: reqId,
                     index: segIndex,
                     audioUrl: audioUrl,
                     text: data.text || ''
@@ -879,6 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const stage = data.stage ? `[${data.stage}] ` : '';
             const errorMsg = data.message || 'Error occurred';
             showToast(`${stage}${errorMsg}`, 'error');
+            recorder.setAiSpeaking(false);
             recorder.setMuted(false);
             setSessionStatus(STATE_ERROR, errorMsg);
             handleAuthOrKeyError(errorMsg);
@@ -888,6 +1197,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             audioQueue = [];
             isPlayingQueue = false;
+            isSpeaking = false;
         }
     }
 
@@ -901,33 +1211,39 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         isPlayingQueue = true;
-        setSessionStatus(STATE_SPEAKING);
+        isSpeaking = true;
+        setSessionStatus(STATE_AI_SPEAKING);
         if (nodeTTS) nodeTTS.classList.add('active');
         if (sessionState.mode === MODE_LIVE_CALL) {
-            recorder.setMuted(true);
+            recorder.setAiSpeaking(true);
         }
 
         const nextSeg = audioQueue.shift();
+        const playbackGeneration = audioPlaybackGeneration;
         if (currentAudio) {
             try { currentAudio.pause(); } catch (e) {}
             currentAudio = null;
         }
 
         currentAudio = new Audio(nextSeg.audioUrl);
+        console.log(`[TTS] Playing audio segment ${nextSeg.index} for request_id=${nextSeg.turnId}`);
 
         currentAudio.onended = () => {
+            if (playbackGeneration !== audioPlaybackGeneration) return;
             currentAudio = null;
             playNextAudioQueueSegment();
         };
 
         currentAudio.onerror = (err) => {
-            console.warn('Audio segment playback error:', err);
+            if (playbackGeneration !== audioPlaybackGeneration) return;
+            console.warn(`[AUDIO] Playback error on segment ${nextSeg.index}:`, err);
             currentAudio = null;
             playNextAudioQueueSegment();
         };
 
         currentAudio.play().catch(e => {
-            console.warn('Audio play failed or auto-play blocked:', e);
+            if (playbackGeneration !== audioPlaybackGeneration) return;
+            console.warn('[AUDIO] Play failed or auto-play prevented:', e);
             currentAudio = null;
             playNextAudioQueueSegment();
         });
@@ -935,22 +1251,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function finishTurnPlayback() {
         isPlayingQueue = false;
+        isSpeaking = false;
         currentAudio = null;
         if (nodeTTS) nodeTTS.classList.remove('active');
         if (nodeLLM) nodeLLM.classList.remove('active');
         if (nodeSTT) nodeSTT.classList.remove('active');
 
-        // Append completed turn to conversation history
+        // Append completed turn to conversation history ONLY when successfully completed
         if (activeTurnUserText && activeAssistantText) {
             conversationHistory.push({ role: 'user', content: activeTurnUserText });
             conversationHistory.push({ role: 'assistant', content: activeAssistantText });
             updateMessageCount();
+            console.log(`[VOICE] Response completed and recorded to history for request_id=${activeTurnId}`);
         }
 
+        activeTurnUserText = null;
+        activeAssistantText = '';
+        activeAssistantBubble = null;
+
         if (sessionState.mode === MODE_LIVE_CALL) {
-            recorder.setMuted(false);
+            recorder.setAiSpeaking(false);
+            recorder.prepareForNextSpeech();
             startInactivityTimer();
-            setSessionStatus(STATE_LIVE_LISTENING);
+            setSessionStatus(STATE_LISTENING);
         } else {
             setSessionStatus(STATE_IDLE);
         }
@@ -973,7 +1296,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // API Audio & Text Pipeline Processing
     // ----------------------------------------------------
     async function processAudio(wavBlob) {
-        const turnId = ++sessionState.turnId;
+        if (!wavBlob) return;
+        const requestId = generateRequestId();
+        sessionState.turnId++;
         sessionState.abortController = new AbortController();
 
         setSessionStatus(STATE_PROCESSING);
@@ -981,6 +1306,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const customKeys = getCustomConfig();
 
+        // WebSocket Streaming Path (Ultra-low latency across all browsers)
+        if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+            activeTurnId = requestId;
+            activeTurnUserText = '';
+            activeAssistantText = '';
+            activeAssistantBubble = null;
+            audioQueue = [];
+            isPlayingQueue = false;
+            isTurnResponseComplete = false;
+
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64Data = reader.result;
+                console.log(`[WS] Submitting audio request_id=${requestId}`);
+                voiceWs.send(JSON.stringify({
+                    type: 'audio',
+                    audio: base64Data,
+                    request_id: requestId,
+                    turn_id: requestId,
+                    history: conversationHistory,
+                    keys: customKeys
+                }));
+            };
+            reader.readAsDataURL(wavBlob);
+            return;
+        }
+
+        // REST Fallback if WebSocket is not connected
         const formData = new FormData();
         formData.append('audio', wavBlob, 'recording.wav');
         formData.append('history', JSON.stringify(conversationHistory));
@@ -996,7 +1349,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
 
             // Guard against superseded turns or cancelled operations
-            if (turnId !== sessionState.turnId) return;
+            if (sessionState.abortController.signal.aborted) return;
 
             if (!response.ok || data.error) {
                 const stage = data.stage ? `[${data.stage}] ` : '';
@@ -1008,11 +1361,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            handleSuccessResponse(data, true, turnId);
+            handleSuccessResponse(data, true, sessionState.turnId);
 
         } catch (err) {
             if (err.name === 'AbortError') return;
-            if (turnId !== sessionState.turnId) return;
 
             recorder.setMuted(false);
             showToast('Network / Server Error: ' + err.message, 'error');
@@ -1022,9 +1374,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function processText(text) {
         if (!text || !text.trim()) return;
-        if (sessionState.status === STATE_PROCESSING || sessionState.status === STATE_SPEAKING) return;
+        if (sessionState.status === STATE_PROCESSING || sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || isSpeaking || isPlayingQueue) {
+            handleBargeIn('text_input', text);
+        }
 
-        const turnId = ++sessionState.turnId;
+        const requestId = generateRequestId();
+        sessionState.turnId++;
         sessionState.abortController = new AbortController();
 
         setSessionStatus(STATE_PROCESSING);
@@ -1036,7 +1391,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Check if WebSocket is open and connected for fast real-time streaming
         if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
-            activeTurnId = turnId;
+            activeTurnId = requestId;
             activeTurnUserText = text.trim();
             activeAssistantText = '';
             activeAssistantBubble = null;
@@ -1044,11 +1399,13 @@ document.addEventListener('DOMContentLoaded', () => {
             isPlayingQueue = false;
             isTurnResponseComplete = false;
 
+            console.log(`[WS] Submitting query request_id=${requestId}: "${text.trim()}"`);
             const customKeys = getCustomConfig();
             voiceWs.send(JSON.stringify({
                 type: 'text',
                 text: text.trim(),
-                turn_id: turnId,
+                request_id: requestId,
+                turn_id: requestId,
                 history: conversationHistory,
                 keys: customKeys
             }));
@@ -1145,9 +1502,10 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAudio = new Audio(audioUrl);
         setSessionStatus(STATE_SPEAKING);
 
-        // Mute mic while assistant speaks
+        // Keep mic active with echo isolation so user can barge in during REST playback
         if (sessionState.mode === MODE_LIVE_CALL) {
-            recorder.setMuted(true);
+            recorder.setAiSpeaking(true);
+            recorder.setMuted(false);
         }
 
         let isPlaybackFinished = false;
@@ -1159,9 +1517,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (turnId && turnId !== sessionState.turnId) return;
 
             if (sessionState.mode === MODE_LIVE_CALL) {
+                recorder.setAiSpeaking(false);
                 recorder.setMuted(false);
+                recorder.prepareForNextSpeech();
                 startInactivityTimer();
-                setSessionStatus(STATE_LIVE_LISTENING);
+                setSessionStatus(STATE_LISTENING);
             } else {
                 setSessionStatus(STATE_IDLE);
             }
@@ -1383,6 +1743,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (chatForm) {
         chatForm.addEventListener('submit', (e) => {
             e.preventDefault();
+            unlockAudio();
             const text = textInput ? textInput.value : '';
             if (text) {
                 textInput.value = '';
@@ -1728,12 +2089,193 @@ document.addEventListener('DOMContentLoaded', () => {
                 inputElevenKey.placeholder = '•••••••••••••••• (Configured on server)';
             }
 
+            // Enumerate available external microphones and update UI
+            await refreshAudioDevicesList(true);
+
             return data;
         } catch (e) {
             console.warn('Could not fetch status:', e);
             return null;
         }
     }
+
+    // ----------------------------------------------------
+    // External Microphone Device Selection & Isolation UI
+    // ----------------------------------------------------
+    function updateMicUIStatus(isConnected, deviceLabel) {
+        const label = deviceLabel || recorder.selectedDeviceLabel || 'None';
+        if (selectedDeviceNameText) {
+            selectedDeviceNameText.textContent = label;
+            selectedDeviceNameText.title = label;
+        }
+
+        if (isConnected) {
+            if (micStatusBadge) {
+                micStatusBadge.textContent = 'CONNECTED';
+                micStatusBadge.className = 'provider-status-badge badge-connected';
+            }
+            if (bargeInStatusBadge) {
+                bargeInStatusBadge.textContent = 'ENABLED';
+                bargeInStatusBadge.className = 'provider-status-badge badge-connected';
+            }
+            if (headerMicDot) {
+                headerMicDot.className = 'mic-dot mic-dot-connected';
+            }
+            if (headerMicLabel) {
+                const shortLabel = label.length > 15 ? label.substring(0, 14) + '...' : label;
+                headerMicLabel.textContent = `Mic: ${shortLabel}`;
+                headerMicLabel.title = `Active External Mic: ${label} (Internal Mic Excluded)`;
+            }
+        } else {
+            if (micStatusBadge) {
+                micStatusBadge.textContent = 'DISCONNECTED';
+                micStatusBadge.className = 'provider-status-badge badge-disconnected';
+            }
+            if (bargeInStatusBadge) {
+                bargeInStatusBadge.textContent = 'DISABLED';
+                bargeInStatusBadge.className = 'provider-status-badge badge-disabled';
+            }
+            if (headerMicDot) {
+                headerMicDot.className = 'mic-dot mic-dot-disconnected';
+            }
+            if (headerMicLabel) {
+                headerMicLabel.textContent = 'Mic: Disconnected';
+                headerMicLabel.title = 'External microphone disconnected. Speech interruption is disabled.';
+            }
+        }
+    }
+
+    async function refreshAudioDevicesList(autoSelectDefault = true) {
+        if (!selectMicDevice) return;
+        selectMicDevice.innerHTML = '<option value="">Detecting available microphones...</option>';
+        if (headerMicLabel) headerMicLabel.textContent = 'Mic: Detecting...';
+        if (headerMicDot) headerMicDot.className = 'mic-dot mic-dot-checking';
+
+        const devices = await recorder.getAudioInputDevices();
+        selectMicDevice.innerHTML = '';
+
+        if (!devices || devices.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No microphones found';
+            selectMicDevice.appendChild(opt);
+            updateMicUIStatus(false, 'None');
+            return;
+        }
+
+        let savedId = recorder.selectedDeviceId;
+        let matchedOption = false;
+
+        devices.forEach(dev => {
+            const opt = document.createElement('option');
+            opt.value = dev.deviceId;
+            opt.textContent = dev.label;
+            if (dev.deviceId === savedId) {
+                opt.selected = true;
+                matchedOption = true;
+            }
+            selectMicDevice.appendChild(opt);
+        });
+
+        if (matchedOption) {
+            const activeLabel = selectMicDevice.selectedOptions[0]?.textContent || recorder.selectedDeviceLabel;
+            recorder.setSelectedDevice(savedId, activeLabel);
+            updateMicUIStatus(true, activeLabel);
+        } else if (autoSelectDefault && devices.length > 0) {
+            // Find preferred external/USB microphone if available
+            const externalDev = devices.find(d => {
+                const l = (d.label || '').toLowerCase();
+                return l.includes('usb') || l.includes('external') || l.includes('headset') || (l.includes('mic') && !l.includes('internal') && !l.includes('array'));
+            }) || devices[0];
+
+            selectMicDevice.value = externalDev.deviceId;
+            recorder.setSelectedDevice(externalDev.deviceId, externalDev.label);
+            updateMicUIStatus(true, externalDev.label);
+        } else {
+            // Saved device is no longer connected!
+            if (savedId) {
+                updateMicUIStatus(false, recorder.selectedDeviceLabel || 'Disconnected');
+                showToast(`Your selected external microphone (${recorder.selectedDeviceLabel}) is disconnected.`, 'warning');
+            } else {
+                updateMicUIStatus(false, 'None Selected');
+            }
+        }
+    }
+
+    if (selectMicDevice) {
+        selectMicDevice.addEventListener('change', async () => {
+            const selectedOpt = selectMicDevice.selectedOptions[0];
+            const deviceId = selectMicDevice.value;
+            const deviceLabel = selectedOpt ? selectedOpt.textContent : '';
+
+            if (deviceId) {
+                recorder.setSelectedDevice(deviceId, deviceLabel);
+                updateMicUIStatus(true, deviceLabel);
+                showToast(`External microphone selected: ${deviceLabel}`, 'info');
+
+                // If currently live, switch stream to the newly selected device immediately
+                if (sessionState.mode === MODE_LIVE_CALL && recorder.isRecording) {
+                    try {
+                        console.log(`[DEVICE] Switching active stream to device: "${deviceLabel}"`);
+                        await recorder.stop();
+                        await recorder.start(true);
+                        showToast(`Microphone switched and active!`, 'success');
+                    } catch (e) {
+                        showToast(`Failed to initialize ${deviceLabel}: ${e.message}`, 'error');
+                    }
+                }
+            } else {
+                recorder.setSelectedDevice('', '');
+                updateMicUIStatus(false, 'None');
+            }
+        });
+    }
+
+    if (btnRefreshMics) {
+        btnRefreshMics.addEventListener('click', async () => {
+            btnRefreshMics.disabled = true;
+            btnRefreshMics.textContent = '↻ Checking...';
+            try {
+                await refreshAudioDevicesList(false);
+                showToast(`Refreshed available microphones`, 'info');
+            } finally {
+                btnRefreshMics.disabled = false;
+                btnRefreshMics.textContent = '↻ Refresh';
+            }
+        });
+    }
+
+    if (headerMicPill) {
+        headerMicPill.addEventListener('click', () => {
+            if (settingsModal) {
+                settingsModal.classList.add('open');
+                setTimeout(() => {
+                    if (selectMicDevice) selectMicDevice.focus();
+                }, 100);
+            }
+        });
+    }
+
+    // AudioRecorder device lifecycle event bindings
+    recorder.onDeviceDisconnected = (deviceId, label, reason) => {
+        updateMicUIStatus(false, label || 'Disconnected');
+        showToast('Your selected external microphone has been disconnected. Speech interruption is temporarily disabled. Please reconnect or select another external microphone.', 'error');
+        if (sessionState.mode === MODE_LIVE_CALL && sessionState.status === STATE_LISTENING) {
+            setSessionStatus(STATE_EXTERNAL_MIC_DISCONNECTED);
+        }
+    };
+
+    recorder.onDeviceConnected = (deviceId, label) => {
+        updateMicUIStatus(true, label);
+        showToast(`External microphone reconnected: ${label}`, 'success');
+        if (sessionState.status === STATE_EXTERNAL_MIC_DISCONNECTED) {
+            setSessionStatus(STATE_IDLE);
+        }
+    };
+
+    recorder.onDevicesChanged = (devices) => {
+        refreshAudioDevicesList(false);
+    };
 
     // ----------------------------------------------------
     // Toast Helper

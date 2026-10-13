@@ -32,6 +32,12 @@
                 <button class="mode-btn" id="btnModeGemini" title="Google Gemini API">💎 Gemini</button>
             </div>
 
+            <!-- External Microphone Status Pill -->
+            <div class="mic-status-pill" id="headerMicPill" title="Microphone Input: External Mic Only for Interruption (Click to configure in Settings)">
+                <span class="mic-dot mic-dot-connected" id="headerMicDot"></span>
+                <span class="mic-pill-label" id="headerMicLabel">Mic: Detecting...</span>
+            </div>
+
             <button class="btn-icon" id="btnClearChat" title="Clear Conversation">
                 <svg width="15" height="15" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                 Clear
@@ -249,6 +255,46 @@
                         <option value="1600">1.6s (Standard)</option>
                         <option value="2000">2.0s (Relaxed)</option>
                     </select>
+                </div>
+
+                <!-- Speech Interruption (Barge-in) -->
+                <div class="form-group" style="margin-top: 0.5rem;">
+                    <label for="selectBargeIn">Speech Interruption (Barge-in)</label>
+                    <select id="selectBargeIn">
+                        <option value="enabled" selected>Enabled (Interrupt anytime by speaking)</option>
+                        <option value="disabled">Disabled (Wait for AI to finish)</option>
+                    </select>
+                    <small class="field-hint">Allows speaking over AI to interrupt immediately with acoustic echo protection.</small>
+                </div>
+
+                <!-- Microphone Input Hardware Selection (Device-Isolated Barge-In) -->
+                <div style="margin-top: 0.85rem; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <div style="font-weight: 600; font-size: 0.86rem; color: var(--text-primary);">Microphone Input (Interruption Isolation)</div>
+                        <span class="provider-status-badge badge-connected" id="micStatusBadge">CONNECTED</span>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="selectMicDevice">Active Microphone Device</label>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <select id="selectMicDevice" style="flex: 1;">
+                                <option value="">Detecting available microphones...</option>
+                            </select>
+                            <button type="button" class="btn-secondary" id="btnRefreshMics" title="Refresh available audio input devices" style="padding: 0 0.8rem; font-size: 0.8rem; white-space: nowrap;">
+                                ↻ Refresh
+                            </button>
+                        </div>
+                        <small class="field-hint">Select your external USB microphone. The internal laptop microphone is strictly excluded from interruption detection.</small>
+                    </div>
+
+                    <div class="provider-status-row" style="margin-top: 0.4rem;">
+                        <span class="provider-status-label">Selected Device:</span>
+                        <span id="selectedDeviceNameText" style="font-size: 0.78rem; font-weight: 500; color: var(--accent-sky-dark); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 220px;">None</span>
+                    </div>
+                    <div class="provider-status-row" style="margin-top: 0.25rem;">
+                        <span class="provider-status-label">Interruption Detection:</span>
+                        <span class="provider-status-badge badge-connected" id="bargeInStatusBadge">ENABLED</span>
+                    </div>
                 </div>
 
                 <div class="modal-actions">

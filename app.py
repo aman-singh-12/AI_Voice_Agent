@@ -4,8 +4,9 @@ import json
 import base64
 import time
 import asyncio
+import threading
 import requests
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -384,11 +385,239 @@ def synthesize_speech_segment(text_segment: str, active_p: str, custom_keys: dic
 async def websocket_voice_endpoint(websocket: WebSocket):
     """
     WebSocket endpoint for real-time Voice AI interaction.
-    Accepts text or audio frames and streams incremental LLM tokens and playable ElevenLabs audio chunks.
+    Accepts text or audio frames and streams incremental LLM tokens and playable audio chunks.
+    Supports instant barge-in speech interruption via cancellable asyncio turn tasks.
     """
+    from starlette.websockets import WebSocketState
+
     await websocket.accept()
     session_history: List[Dict[str, str]] = []
     session_keys: Dict[str, str] = {}
+    active_turn_task: Optional[asyncio.Task] = None
+    active_turn_id: Optional[Any] = None
+
+    async def safe_send(payload: dict) -> bool:
+        """Safely sends JSON payload, preventing RuntimeError if socket is closed or disconnecting."""
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_json(payload)
+                return True
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        except Exception as ex:
+            print(f"[WebSocket safe_send warning] {ex}")
+        return False
+
+    async def cancel_active_turn():
+        nonlocal active_turn_task
+        if active_turn_task and not active_turn_task.done():
+            active_turn_task.cancel()
+            try:
+                await active_turn_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            active_turn_task = None
+
+    async def process_turn_task(turn_id: Any, prompt_text: str, custom_keys: dict, history: list):
+        nonlocal active_turn_id
+        active_turn_id = turn_id
+        req_id = str(turn_id)
+        stop_event = threading.Event()
+        print(f"[SESSION] Processing turn started request_id={req_id}")
+        try:
+            active_p = custom_keys.get("llm_provider") or session_keys.get("llm_provider") or pipeline.llm_manager.resolve_active_provider_name()
+            print(f"[LLM] New response generation started request_id={req_id} provider={active_p}")
+            await safe_send({
+                "type": "llm_start",
+                "request_id": req_id,
+                "turn_id": turn_id,
+                "provider": active_p
+            })
+
+            # Run synchronous LLM stream in worker thread and pipe into asyncio.Queue
+            # Keeps the event loop completely unblocked for immediate interrupt dispatching
+            loop = asyncio.get_running_loop()
+            q = asyncio.Queue()
+            sentinel = object()
+
+            def stream_worker():
+                try:
+                    for chunk in pipeline.stream_llm(
+                        prompt=prompt_text,
+                        conversation_history=history,
+                        provider_name=active_p
+                    ):
+                        if stop_event.is_set():
+                            break
+                        loop.call_soon_threadsafe(q.put_nowait, chunk)
+                except Exception as ex:
+                    if not stop_event.is_set():
+                        loop.call_soon_threadsafe(q.put_nowait, ex)
+                finally:
+                    loop.call_soon_threadsafe(q.put_nowait, sentinel)
+
+            threading.Thread(target=stream_worker, daemon=True).start()
+
+            full_chunks = []
+            sentence_buffer = ""
+            segment_index = 0
+
+            while True:
+                chunk = await q.get()
+                if chunk is sentinel:
+                    break
+                if isinstance(chunk, Exception):
+                    raise chunk
+                if not chunk:
+                    continue
+
+                full_chunks.append(chunk)
+                sentence_buffer += chunk
+
+                # Forward incremental LLM text to browser
+                await safe_send({
+                    "type": "text_chunk",
+                    "request_id": req_id,
+                    "turn_id": turn_id,
+                    "chunk": chunk,
+                    "text": chunk
+                })
+                await safe_send({
+                    "type": "llm_token",
+                    "request_id": req_id,
+                    "turn_id": turn_id,
+                    "chunk": chunk,
+                    "text": chunk
+                })
+                await safe_send({
+                    "type": "llm_chunk",
+                    "request_id": req_id,
+                    "turn_id": turn_id,
+                    "chunk": chunk,
+                    "text": chunk
+                })
+
+                # Check for completed sentences to synthesize audio chunk immediately
+                ready_sentences, sentence_buffer = extract_ready_sentences(sentence_buffer, is_final=False)
+                for sent in ready_sentences:
+                    if not sent.strip():
+                        continue
+                    try:
+                        audio_bytes = await asyncio.to_thread(synthesize_speech_segment, sent.strip(), active_p, custom_keys)
+                        if audio_bytes:
+                            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+                            await safe_send({
+                                "type": "audio_chunk",
+                                "request_id": req_id,
+                                "turn_id": turn_id,
+                                "segment_index": segment_index,
+                                "audio_format": "mp3",
+                                "audio_data": audio_b64,
+                                "text": sent.strip()
+                            })
+                            await safe_send({
+                                "type": "tts_audio_chunk",
+                                "request_id": req_id,
+                                "turn_id": turn_id,
+                                "segment_index": segment_index,
+                                "audio_format": "mp3",
+                                "audio_data": audio_b64,
+                                "text": sent.strip()
+                            })
+                            segment_index += 1
+                    except asyncio.CancelledError:
+                        stop_event.set()
+                        raise
+                    except Exception as e:
+                        print(f"[TTS segment error] {e}")
+
+            # Flush final sentence buffer
+            if sentence_buffer.strip():
+                final_sentences, _ = extract_ready_sentences(sentence_buffer, is_final=True)
+                for sent in final_sentences:
+                    if not sent.strip():
+                        continue
+                    try:
+                        audio_bytes = await asyncio.to_thread(synthesize_speech_segment, sent.strip(), active_p, custom_keys)
+                        if audio_bytes:
+                            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+                            await safe_send({
+                                "type": "audio_chunk",
+                                "request_id": req_id,
+                                "turn_id": turn_id,
+                                "segment_index": segment_index,
+                                "audio_format": "mp3",
+                                "audio_data": audio_b64,
+                                "text": sent.strip()
+                            })
+                            await safe_send({
+                                "type": "tts_audio_chunk",
+                                "request_id": req_id,
+                                "turn_id": turn_id,
+                                "segment_index": segment_index,
+                                "audio_format": "mp3",
+                                "audio_data": audio_b64,
+                                "text": sent.strip()
+                            })
+                            segment_index += 1
+                    except asyncio.CancelledError:
+                        stop_event.set()
+                        raise
+                    except Exception as e:
+                        print(f"[TTS final segment error] {e}")
+
+            assistant_text = "".join(full_chunks).strip()
+            # Only save to session history if turn completed without interruption
+            session_history.append({"role": "user", "content": prompt_text})
+            if assistant_text:
+                session_history.append({"role": "assistant", "content": assistant_text})
+
+            print(f"[VOICE] Response completed request_id={req_id} segments={segment_index}")
+            # Final completion events
+            await safe_send({
+                "type": "response_complete",
+                "request_id": req_id,
+                "turn_id": turn_id,
+                "full_text": assistant_text,
+                "text": assistant_text,
+                "segments_count": segment_index
+            })
+            await safe_send({
+                "type": "llm_done",
+                "request_id": req_id,
+                "turn_id": turn_id,
+                "full_text": assistant_text,
+                "text": assistant_text
+            })
+            await safe_send({
+                "type": "response",
+                "request_id": req_id,
+                "turn_id": turn_id,
+                "user_text": prompt_text,
+                "assistant_text": assistant_text,
+                "llm_text": assistant_text,
+                "segments_count": segment_index,
+                "mode": active_p,
+                "provider": active_p
+            })
+
+        except asyncio.CancelledError:
+            stop_event.set()
+            print(f"[BACKEND] Turn {req_id} cancelled via interruption. Releasing resources.")
+            print(f"[LLM] Previous generation cancelled request_id={req_id}")
+            print(f"[TTS] Previous TTS task cancelled request_id={req_id}")
+            print(f"[SESSION] Previous response invalidated request_id={req_id}")
+            return
+        except VoicePipelineError as vpe:
+            stop_event.set()
+            await safe_send({"type": "llm_error", "request_id": req_id, "turn_id": turn_id, "stage": vpe.stage, "message": vpe.message})
+            await safe_send({"type": "error", "request_id": req_id, "turn_id": turn_id, "error": True, "stage": vpe.stage, "message": vpe.message})
+        except Exception as e:
+            stop_event.set()
+            await safe_send({"type": "llm_error", "request_id": req_id, "turn_id": turn_id, "stage": "UNKNOWN", "message": str(e)})
+            await safe_send({"type": "error", "request_id": req_id, "turn_id": turn_id, "error": True, "stage": "UNKNOWN", "message": f"Server error: {str(e)}"})
+        finally:
+            stop_event.set()
 
     try:
         while True:
@@ -404,7 +633,7 @@ async def websocket_voice_endpoint(websocket: WebSocket):
                 msg_type = data.get("type", "text")
 
                 if msg_type == "ping":
-                    await websocket.send_json({"type": "pong", "time": time.time()})
+                    await safe_send({"type": "pong", "time": time.time()})
                     continue
 
                 if msg_type == "config":
@@ -412,11 +641,36 @@ async def websocket_voice_endpoint(websocket: WebSocket):
                         session_keys.update(data["keys"])
                     if "pipeline_mode" in data:
                         session_keys["pipeline_mode"] = data["pipeline_mode"]
-                    await websocket.send_json({"type": "config_ack", "status": "ok"})
+                    await safe_send({"type": "config_ack", "status": "ok"})
                     continue
 
-                # Process either transcribed text or audio
-                turn_id = data.get("turn_id") or int(time.time() * 1000)
+                # Speech Interruption / Barge-in signal from client
+                if msg_type == "interrupt":
+                    target_turn = data.get("request_id") or data.get("turn_id") or active_turn_id
+                    target_req = str(target_turn) if target_turn is not None else ""
+                    print(f"[BACKEND] Interrupt event received request_id={target_req}")
+                    await cancel_active_turn()
+                    print(f"[LLM] Previous generation cancelled request_id={target_req}")
+                    print(f"[TTS] Previous TTS task cancelled request_id={target_req}")
+                    print(f"[SESSION] Previous response invalidated request_id={target_req}")
+                    await safe_send({
+                        "type": "interrupt_ack",
+                        "request_id": target_req,
+                        "turn_id": target_turn,
+                        "status": "cancelled"
+                    })
+                    await safe_send({
+                        "type": "interrupted",
+                        "request_id": target_req,
+                        "turn_id": target_turn
+                    })
+                    continue
+
+                # Cancel any existing turn before starting a new one
+                await cancel_active_turn()
+
+                turn_id = data.get("request_id") or data.get("turn_id") or f"req_{int(time.time() * 1000)}"
+                req_id = str(turn_id)
                 custom_keys = data.get("keys", session_keys)
                 raw_hist = data.get("history")
                 history = raw_hist if (isinstance(raw_hist, list) and len(raw_hist) > 0) else session_history
@@ -429,16 +683,21 @@ async def websocket_voice_endpoint(websocket: WebSocket):
                     try:
                         audio_bytes = base64.b64decode(audio_b64)
                         prompt_text = pipeline.stt.transcribe(audio_bytes)
-                        await websocket.send_json({
+                        print(f"[STT] New user transcript received request_id={req_id}: '{prompt_text}'")
+                        await safe_send({
                             "type": "transcript",
+                            "request_id": req_id,
                             "turn_id": turn_id,
                             "text": prompt_text
                         })
                     except VoicePipelineError as vpe:
-                        await websocket.send_json({"type": "error", "turn_id": turn_id, "stage": vpe.stage, "message": vpe.message})
+                        if "no speech" in vpe.message.lower() or "could not understand" in vpe.message.lower():
+                            await safe_send({"type": "no_speech", "request_id": req_id, "turn_id": turn_id, "message": vpe.message})
+                        else:
+                            await safe_send({"type": "error", "request_id": req_id, "turn_id": turn_id, "stage": vpe.stage, "message": vpe.message})
                         continue
                     except Exception as e:
-                        await websocket.send_json({"type": "error", "turn_id": turn_id, "stage": "STT", "message": str(e)})
+                        await safe_send({"type": "error", "request_id": req_id, "turn_id": turn_id, "stage": "STT", "message": str(e)})
                         continue
                 else:
                     prompt_text = data.get("text") or data.get("message") or data.get("prompt") or raw_text
@@ -446,236 +705,42 @@ async def websocket_voice_endpoint(websocket: WebSocket):
                 if not prompt_text or not prompt_text.strip():
                     continue
 
-                try:
-                    active_p = custom_keys.get("llm_provider") or session_keys.get("llm_provider") or pipeline.llm_manager.resolve_active_provider_name()
-                    await websocket.send_json({
-                        "type": "llm_start",
-                        "turn_id": turn_id,
-                        "provider": active_p
-                    })
-
-                    full_chunks = []
-                    sentence_buffer = ""
-                    segment_index = 0
-
-                    for chunk in pipeline.stream_llm(
-                        prompt=prompt_text,
-                        conversation_history=history,
-                        provider_name=active_p
-                    ):
-                        if not chunk:
-                            continue
-                        full_chunks.append(chunk)
-                        sentence_buffer += chunk
-
-                        # 1. Forward incremental LLM text to browser
-                        await websocket.send_json({
-                            "type": "text_chunk",
-                            "turn_id": turn_id,
-                            "chunk": chunk,
-                            "text": chunk
-                        })
-                        await websocket.send_json({
-                            "type": "llm_chunk",
-                            "turn_id": turn_id,
-                            "chunk": chunk,
-                            "text": chunk
-                        })
-
-                        # 2. Check for completed sentences to synthesize audio chunk immediately
-                        ready_sentences, sentence_buffer = extract_ready_sentences(sentence_buffer, is_final=False)
-                        for sent in ready_sentences:
-                            if not sent.strip():
-                                continue
-                            try:
-                                audio_bytes = await asyncio.to_thread(synthesize_speech_segment, sent.strip(), active_p, custom_keys)
-                                if audio_bytes:
-                                    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-                                    await websocket.send_json({
-                                        "type": "audio_chunk",
-                                        "turn_id": turn_id,
-                                        "segment_index": segment_index,
-                                        "audio_format": "mp3",
-                                        "audio_data": audio_b64,
-                                        "text": sent.strip()
-                                    })
-                                    segment_index += 1
-                            except Exception as e:
-                                print(f"[TTS segment error] {e}")
-
-                    # 3. Flush final sentence buffer
-                    if sentence_buffer.strip():
-                        final_sentences, _ = extract_ready_sentences(sentence_buffer, is_final=True)
-                        for sent in final_sentences:
-                            if not sent.strip():
-                                continue
-                            try:
-                                audio_bytes = await asyncio.to_thread(synthesize_speech_segment, sent.strip(), active_p, custom_keys)
-                                if audio_bytes:
-                                    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-                                    await websocket.send_json({
-                                        "type": "audio_chunk",
-                                        "turn_id": turn_id,
-                                        "segment_index": segment_index,
-                                        "audio_format": "mp3",
-                                        "audio_data": audio_b64,
-                                        "text": sent.strip()
-                                    })
-                                    segment_index += 1
-                            except Exception as e:
-                                print(f"[TTS final segment error] {e}")
-
-                    assistant_text = "".join(full_chunks).strip()
-                    session_history.append({"role": "user", "content": prompt_text})
-                    if assistant_text:
-                        session_history.append({"role": "assistant", "content": assistant_text})
-
-                    # 4. Final completion events
-                    await websocket.send_json({
-                        "type": "response_complete",
-                        "turn_id": turn_id,
-                        "full_text": assistant_text,
-                        "text": assistant_text,
-                        "segments_count": segment_index
-                    })
-                    await websocket.send_json({
-                        "type": "llm_done",
-                        "turn_id": turn_id,
-                        "full_text": assistant_text,
-                        "text": assistant_text
-                    })
-                    await websocket.send_json({
-                        "type": "response",
-                        "turn_id": turn_id,
-                        "user_text": prompt_text,
-                        "assistant_text": assistant_text,
-                        "llm_text": assistant_text,
-                        "segments_count": segment_index,
-                        "mode": active_p,
-                        "provider": active_p
-                    })
-
-                except VoicePipelineError as vpe:
-                    await websocket.send_json({"type": "llm_error", "turn_id": turn_id, "stage": vpe.stage, "message": vpe.message})
-                    await websocket.send_json({
-                        "type": "error",
-                        "turn_id": turn_id,
-                        "error": True,
-                        "stage": vpe.stage,
-                        "message": vpe.message
-                    })
-                except Exception as e:
-                    await websocket.send_json({"type": "llm_error", "turn_id": turn_id, "stage": "UNKNOWN", "message": str(e)})
-                    await websocket.send_json({
-                        "type": "error",
-                        "turn_id": turn_id,
-                        "error": True,
-                        "stage": "UNKNOWN",
-                        "message": f"Server error: {str(e)}"
-                    })
+                active_turn_task = asyncio.create_task(
+                    process_turn_task(turn_id, prompt_text.strip(), custom_keys, history)
+                )
 
             elif "bytes" in message and message["bytes"]:
-                turn_id = int(time.time() * 1000)
+                turn_id = f"req_{int(time.time() * 1000)}"
+                req_id = turn_id
                 audio_bytes = message["bytes"]
                 try:
-                    active_p = session_keys.get("llm_provider") or pipeline.llm_manager.resolve_active_provider_name()
+                    await cancel_active_turn()
                     prompt_text = pipeline.stt.transcribe(audio_bytes)
-                    await websocket.send_json({
+                    print(f"[STT] New user transcript received request_id={req_id}: '{prompt_text}'")
+                    await safe_send({
                         "type": "transcript",
+                        "request_id": req_id,
                         "turn_id": turn_id,
                         "text": prompt_text
                     })
-
-                    await websocket.send_json({
-                        "type": "llm_start",
-                        "turn_id": turn_id,
-                        "provider": active_p
-                    })
-
-                    full_chunks = []
-                    sentence_buffer = ""
-                    segment_index = 0
-
-                    for chunk in pipeline.stream_llm(
-                        prompt=prompt_text,
-                        conversation_history=session_history,
-                        provider_name=active_p
-                    ):
-                        if not chunk:
-                            continue
-                        full_chunks.append(chunk)
-                        sentence_buffer += chunk
-
-                        await websocket.send_json({
-                            "type": "text_chunk",
-                            "turn_id": turn_id,
-                            "chunk": chunk,
-                            "text": chunk
-                        })
-
-                        ready_sentences, sentence_buffer = extract_ready_sentences(sentence_buffer, is_final=False)
-                        for sent in ready_sentences:
-                            if not sent.strip():
-                                continue
-                            try:
-                                audio_bytes = await asyncio.to_thread(synthesize_speech_segment, sent.strip(), active_p, session_keys)
-                                if audio_bytes:
-                                    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-                                    await websocket.send_json({
-                                        "type": "audio_chunk",
-                                        "turn_id": turn_id,
-                                        "segment_index": segment_index,
-                                        "audio_format": "mp3",
-                                        "audio_data": audio_b64,
-                                        "text": sent.strip()
-                                    })
-                                    segment_index += 1
-                            except Exception as e:
-                                print(f"[TTS segment error] {e}")
-
-                    if sentence_buffer.strip():
-                        final_sentences, _ = extract_ready_sentences(sentence_buffer, is_final=True)
-                        for sent in final_sentences:
-                            if not sent.strip():
-                                continue
-                            try:
-                                audio_bytes = await asyncio.to_thread(synthesize_speech_segment, sent.strip(), active_p, session_keys)
-                                if audio_bytes:
-                                    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-                                    await websocket.send_json({
-                                        "type": "audio_chunk",
-                                        "turn_id": turn_id,
-                                        "segment_index": segment_index,
-                                        "audio_format": "mp3",
-                                        "audio_data": audio_b64,
-                                        "text": sent.strip()
-                                    })
-                                    segment_index += 1
-                            except Exception as e:
-                                print(f"[TTS final segment error] {e}")
-
-                    assistant_text = "".join(full_chunks).strip()
-                    session_history.append({"role": "user", "content": prompt_text})
-                    if assistant_text:
-                        session_history.append({"role": "assistant", "content": assistant_text})
-
-                    await websocket.send_json({
-                        "type": "response_complete",
-                        "turn_id": turn_id,
-                        "full_text": assistant_text,
-                        "text": assistant_text,
-                        "segments_count": segment_index
-                    })
-
+                    if prompt_text and prompt_text.strip():
+                        active_turn_task = asyncio.create_task(
+                            process_turn_task(turn_id, prompt_text.strip(), session_keys, session_history)
+                        )
                 except VoicePipelineError as vpe:
-                    await websocket.send_json({"type": "error", "turn_id": turn_id, "stage": vpe.stage, "message": vpe.message})
+                    if "no speech" in vpe.message.lower() or "could not understand" in vpe.message.lower():
+                        await safe_send({"type": "no_speech", "request_id": req_id, "turn_id": turn_id, "message": vpe.message})
+                    else:
+                        await safe_send({"type": "error", "request_id": req_id, "turn_id": turn_id, "stage": vpe.stage, "message": vpe.message})
                 except Exception as e:
-                    await websocket.send_json({"type": "error", "turn_id": turn_id, "stage": "UNKNOWN", "message": f"Server error: {str(e)}"})
+                    await safe_send({"type": "error", "request_id": req_id, "turn_id": turn_id, "stage": "UNKNOWN", "message": f"Server error: {str(e)}"})
 
     except (WebSocketDisconnect, RuntimeError):
         pass
     except Exception as e:
         print(f"WebSocket /ws/voice error: {e}")
+    finally:
+        await cancel_active_turn()
 
 @app.get("/ws/voice")
 async def ws_voice_info():

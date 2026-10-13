@@ -770,6 +770,20 @@ main.conversation-collapsed {
 .tag.tts { color: #0284c7; background: #f0f9ff; border-color: #bae6fd; }
 .tag.total { color: #0369a1; background: #e0f2fe; border-color: #7dd3fc; font-weight: 600; }
 
+.interrupted-tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-style: italic;
+    color: #e11d48;
+    background: #ffe4e6;
+    border: 1px solid #fecdd3;
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
 .replay-btn {
     background: transparent;
     border: none;
@@ -1230,3 +1244,69 @@ main.conversation-collapsed {
 }
 .test-result-msg.success { color: #0284c7; }
 .test-result-msg.error { color: #b91c1c; }
+
+/* External Microphone Status Pill in Header */
+.mic-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-color);
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.mic-status-pill:hover {
+    border-color: var(--accent-sky-border);
+    background: var(--accent-sky-subtle);
+    color: var(--accent-sky-dark);
+}
+
+.mic-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: background 0.3s ease;
+}
+
+.mic-dot-connected {
+    background: #10b981;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+}
+
+.mic-dot-disconnected {
+    background: #ef4444;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+
+.mic-dot-checking {
+    background: #f59e0b;
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+}
+
+.mic-pill-label {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Status Badges for Mic Isolation */
+.provider-status-badge.badge-disconnected {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+}
+
+.provider-status-badge.badge-disabled {
+    background: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #e2e8f0;
+}
