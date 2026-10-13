@@ -88,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectLocalVoice = document.getElementById('selectLocalVoice');
     const selectSilenceDuration = document.getElementById('selectSilenceDuration');
     const selectBargeIn = document.getElementById('selectBargeIn');
+    const selectBargeInSensitivity = document.getElementById('selectBargeInSensitivity');
 
     // External Microphone Isolation & Device Selection DOM Elements
     const selectMicDevice = document.getElementById('selectMicDevice');
@@ -331,6 +332,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Speech interruption sensitivity listener
+    if (selectBargeInSensitivity) {
+        const savedSensitivity = localStorage.getItem('voice_ai_bargein_sensitivity') || 'normal';
+        selectBargeInSensitivity.value = savedSensitivity;
+        if (recorder.setBargeInSensitivity) {
+            recorder.setBargeInSensitivity(savedSensitivity);
+        }
+
+        selectBargeInSensitivity.addEventListener('change', (e) => {
+            const level = e.target.value;
+            if (recorder.setBargeInSensitivity) {
+                recorder.setBargeInSensitivity(level);
+            }
+            showToast(`Interruption mic sensitivity set to: ${level}`, 'info');
+        });
+    }
+
     // ----------------------------------------------------
     // SVG Icons Map for Primary Action Button
     // ----------------------------------------------------
@@ -540,6 +558,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function setSessionStatus(newStatus, errorMsg = '') {
         sessionState.status = newStatus;
         sessionState.errorMessage = errorMsg;
+        if (typeof recorder !== 'undefined' && recorder) {
+            if (recorder.setAiProcessing) {
+                recorder.setAiProcessing(newStatus === STATE_PROCESSING);
+            }
+        }
         updateUI();
     }
 
@@ -586,7 +609,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Speech Interruption (Barge-in) & Acoustic Echo Isolation
     // ----------------------------------------------------
     function isEchoOfAi(candidateText, aiText) {
-        if (!candidateText || !aiText) return false;
+        if (!candidateText) return false;
+        if (!aiText) {
+            // If activeAssistantText is not populated yet, check the most recent assistant message from history
+            const lastAssistantMsg = conversationHistory.filter(m => m.role === 'assistant').pop()?.content || '';
+            aiText = lastAssistantMsg;
+        }
+        if (!aiText) return false;
+
         const cleanCandidate = candidateText.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
         const cleanAi = aiText.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
         if (!cleanCandidate || !cleanAi) return false;
@@ -594,27 +624,53 @@ document.addEventListener('DOMContentLoaded', () => {
         const candidateWords = cleanCandidate.split(/\s+/).filter(Boolean);
         if (candidateWords.length === 0) return false;
 
+        // If candidate contains an explicit interruption keyword, it is a deliberate user command, NOT an echo!
+        const interruptKeywords = ['wait', 'stop', 'hold', 'cancel', 'pause', 'quiet', 'shut', 'listen', 'actually', 'hey'];
+        const hasInterruptKeyword = candidateWords.some(w => interruptKeywords.includes(w));
+        if (hasInterruptKeyword) {
+            return false;
+        }
+
         const aiWordsList = cleanAi.split(/\s+/).filter(Boolean);
         const aiWordsSet = new Set(aiWordsList);
 
-        // If candidate is a single common stopword present in AI speech, filter as acoustic feedback
-        const commonStopwords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'it', 'its', 'you', 'your', 'i', 'my', 'we', 'our', 'and', 'or', 'but', 'hello', 'hi']);
-        if (candidateWords.length === 1 && commonStopwords.has(candidateWords[0]) && aiWordsSet.has(candidateWords[0])) {
+        // Single words: if it's a stopword or a word in the AI's current sentence, treat as potential echo/bleed
+        const commonWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'it', 'its', 'you', 'your', 'i', 'my', 'we', 'our', 'and', 'or', 'but', 'hello', 'hi', 'sure', 'yes', 'no', 'so', 'can', 'will', 'do', 'that', 'this', 'there', 'here', 'what', 'how']);
+        if (candidateWords.length === 1) {
+            return commonWords.has(candidateWords[0]) || aiWordsSet.has(candidateWords[0]);
+        }
+
+        // Direct contiguous substring match: the candidate phrase was literally spoken by the AI
+        if (cleanAi.includes(cleanCandidate)) {
             return true;
         }
 
-        // Direct phrase match: speaker sound picked up word-for-word
-        if (candidateWords.length >= 2 && cleanAi.includes(cleanCandidate)) {
+        // Direct reverse substring match: AI speech is contained inside candidate
+        if (cleanCandidate.includes(cleanAi)) {
             return true;
         }
 
-        // High overlap ratio indicates speaker audio leaking into microphone
-        let matched = 0;
-        for (const w of candidateWords) {
-            if (aiWordsSet.has(w)) matched++;
+        // For multi-word phrases (>= 3 words), check if a 3-word contiguous sequence matches AI speech
+        // Real acoustic echo always leaks contiguous word sequences, never scrambled words!
+        if (candidateWords.length >= 3) {
+            let has3GramMatch = false;
+            for (let i = 0; i <= candidateWords.length - 3; i++) {
+                const trigram = `${candidateWords[i]} ${candidateWords[i+1]} ${candidateWords[i+2]}`;
+                if (cleanAi.includes(trigram)) {
+                    has3GramMatch = true;
+                    break;
+                }
+            }
+            let matched = 0;
+            for (const w of candidateWords) {
+                if (aiWordsSet.has(w)) matched++;
+            }
+            if (has3GramMatch && (matched / candidateWords.length >= 0.85)) {
+                return true;
+            }
         }
-        const overlap = matched / candidateWords.length;
-        return overlap >= 0.65;
+
+        return false;
     }
 
     function interruptAssistantPlayback(reason = 'user_barge_in') {
@@ -646,6 +702,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const interruptedId = activeTurnId;
         console.log(`[BARGE-IN] External microphone interruption confirmed via ${source} for request_id=${interruptedId}:`, initialText || '(vocal interruption)');
+
+        // CRITICAL FOR PRESERVING FULL SENTENCE:
+        // When user interrupts mid-speech (via partial transcript, VAD energy, etc.),
+        // the user has ALREADY STARTED speaking their new question/sentence!
+        // We notify recorder via handleBargeInActive BEFORE stopping assistant playback
+        // so that setAiSpeaking(false) preserves ongoing audio and transcript buffers.
+        if (source === 'speech_final' || source === 'silence_final') {
+            recorder.prepareForNextSpeech();
+        } else if (recorder.handleBargeInActive) {
+            recorder.handleBargeInActive(source, initialText);
+        }
 
         // Stop playback before invalidating the turn so no stale audio can resume.
         interruptAssistantPlayback('user_barge_in');
@@ -691,7 +758,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 7. Transition state machine: AI_SPEAKING/PROCESSING -> INTERRUPTING -> USER_SPEAKING
-        recorder.prepareForNextSpeech();
+        if (source === 'speech_final' || source === 'silence_final') {
+            recorder.prepareForNextSpeech();
+        }
         isProcessing = false;
         clearInactivityTimer();
 
@@ -718,8 +787,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    function isAiActivelyPlayingAudio() {
+        return (
+            sessionState.status === STATE_AI_SPEAKING ||
+            sessionState.status === STATE_SPEAKING ||
+            isSpeaking ||
+            isPlayingQueue ||
+            (currentAudio !== null && !currentAudio.paused) ||
+            (typeof recorder !== 'undefined' && recorder && recorder.isAiSpeaking)
+        );
+    }
+
     recorder.onBargeIn = (source, text) => {
-        if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || currentAudio) {
+        if (isAiActivelyPlayingAudio()) {
+            handleBargeIn(source, text);
+        } else if (sessionState.status === STATE_PROCESSING) {
             handleBargeIn(source, text);
         }
     };
@@ -727,13 +809,9 @@ document.addEventListener('DOMContentLoaded', () => {
     recorder.onSpeechStart = () => {
         clearInactivityTimer();
         console.log(`[VOICE] Speech start detected on external mic. Status=${sessionState.status}`);
-        if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || currentAudio) {
-            // Strict check: Only external mic VAD can trigger interruption
-            if (!recorder.isExternalMicActive()) {
-                console.warn('[BARGE-IN] Speech start rejected: External microphone inactive, internal mic rejection enforced.');
-                return;
-            }
-            handleBargeIn(sessionState.status === STATE_PROCESSING ? 'llm_generation_interruption' : 'speech_start');
+        if (isAiActivelyPlayingAudio() || sessionState.status === STATE_PROCESSING) {
+            // Note: During AI playback or generation, transient single-frame audio spikes (<200ms) must NOT interrupt.
+            // Internal audio or background noise on frame 1 is completely ignored.
             return;
         }
         if (sessionState.mode === MODE_LIVE_CALL && (sessionState.status === STATE_LISTENING || sessionState.status === STATE_LIVE_LISTENING)) {
@@ -750,21 +828,35 @@ document.addEventListener('DOMContentLoaded', () => {
         if (recorder.isMuted) return;
         if (!text || !text.trim()) return;
 
-        // If AI is speaking or LLM is processing: enforce external mic VAD authorization
-        if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || (metadata && metadata.isAiSpeaking)) {
-            // Native speech recognition in browser uses OS default mic (laptop internal mic).
-            // It MUST NOT trigger barge-in unless external mic VAD actively confirmed speech!
-            if (!recorder.isExternalMicActive() || !recorder.hasSpokenInTurn) {
-                console.log('[BARGE-IN] Partial transcript ignored during AI playback: External mic VAD has not confirmed speech. Internal mic audio excluded.');
+        // If AI is actively speaking or LLM is processing:
+        if (isAiActivelyPlayingAudio() || sessionState.status === STATE_PROCESSING || (metadata && metadata.isAiSpeaking)) {
+            // 1. Strict Rule: Only authorized external microphone can trigger interruption
+            if (!recorder.isExternalMicActive()) {
+                console.log('[BARGE-IN] Partial transcript ignored during AI playback: Internal microphone excluded from interruption.');
                 return;
             }
-            if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || isSpeaking) {
+
+            // 2. Strict Echo Protection: Verify transcript is NOT an acoustic echo of AI internal audio
+            if (isAiActivelyPlayingAudio()) {
                 if (isEchoOfAi(text, activeAssistantText)) {
-                    console.log('[Echo Guard] Ignored acoustic echo leak:', text);
+                    console.log('[Echo Guard] Ignored acoustic echo leak from internal audio:', text);
                     return;
                 }
             }
-            // Genuine human interruption confirmed on external microphone!
+
+            // 3. Ambient Noise & Faint Voice Filter:
+            // Disregard faint filler murmurs / noise blips while allowing genuine human words to interrupt
+            const cleanWords = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).filter(Boolean);
+            const ambientMurmurs = new Set(['uh', 'um', 'ah', 'er', 'mm', 'hmm']);
+            const isAmbientMurmur = cleanWords.length === 0 || (cleanWords.length === 1 && (ambientMurmurs.has(cleanWords[0]) || cleanWords[0].length <= 2));
+
+            if (isAmbientMurmur) {
+                console.log(`[BARGE-IN] Ambient filler murmur / noise fragment neglected during AI playback ("${text}"). Normal speech required.`);
+                return;
+            }
+
+            // 4. Genuine human interruption confirmed on microphone!
+            console.log('[BARGE-IN] Verified user vocal interruption (non-echo, normal speech) confirmed:', text);
             handleBargeIn('partial_transcript', text);
         }
 
@@ -779,17 +871,25 @@ document.addEventListener('DOMContentLoaded', () => {
     recorder.onSpeechTranscript = async (text) => {
         clearInactivityTimer();
         if (!text || !text.trim()) return;
-        console.log(`[STT] User utterance finalized on external mic: "${text}"`);
+        console.log(`[STT] User utterance finalized on active mic: "${text}"`);
 
         if (sessionState.mode === MODE_LIVE_CALL) {
-            if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || currentAudio) {
-                if (!recorder.isExternalMicActive() || !recorder.hasSpokenInTurn) {
-                    console.log('[BARGE-IN] Final transcript ignored during AI playback: External mic VAD has not confirmed speech. Internal mic audio excluded.');
+            if (isAiActivelyPlayingAudio() || sessionState.status === STATE_PROCESSING) {
+                if (!recorder.isExternalMicActive()) {
+                    console.log('[BARGE-IN] Final transcript ignored: Microphone not active.');
                     return;
                 }
-                if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || isSpeaking) {
+                if (isAiActivelyPlayingAudio()) {
                     if (isEchoOfAi(text, activeAssistantText)) {
-                        console.log('[Echo Guard] Dropped final transcript matching AI echo:', text);
+                        console.log('[Echo Guard] Dropped final transcript matching AI internal audio echo:', text);
+                        return;
+                    }
+                    const cleanWords = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).filter(Boolean);
+                    const ambientMurmurs = new Set(['uh', 'um', 'ah', 'er', 'mm', 'hmm']);
+                    const isAmbientMurmur = cleanWords.length === 0 || (cleanWords.length === 1 && (ambientMurmurs.has(cleanWords[0]) || cleanWords[0].length <= 2));
+
+                    if (isAmbientMurmur) {
+                        console.log(`[BARGE-IN] Ambient murmur neglected on speech transcript: "${text}"`);
                         return;
                     }
                 }
@@ -805,9 +905,13 @@ document.addEventListener('DOMContentLoaded', () => {
     recorder.onSilenceDetected = async (wavBlob) => {
         clearInactivityTimer();
         if (sessionState.mode === MODE_LIVE_CALL && wavBlob) {
-            if (sessionState.status === STATE_AI_SPEAKING || sessionState.status === STATE_SPEAKING || sessionState.status === STATE_PROCESSING || isSpeaking || isPlayingQueue || currentAudio) {
-                if (!recorder.isExternalMicActive() || !recorder.hasSpokenInTurn) {
-                    console.log('[BARGE-IN] WAV blob ignored during AI playback: External mic VAD has not confirmed speech. Internal mic audio excluded.');
+            if (isAiActivelyPlayingAudio() || sessionState.status === STATE_PROCESSING) {
+                if (!recorder.isExternalMicActive()) {
+                    console.log('[BARGE-IN] WAV blob ignored during AI playback: Internal mic audio excluded.');
+                    return;
+                }
+                if (isAiActivelyPlayingAudio()) {
+                    console.log('[Echo Guard] Silence trigger ignored during active AI speaker playback.');
                     return;
                 }
                 handleBargeIn('silence_final');
@@ -900,7 +1004,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
+            if (!recorder.selectedDeviceId) {
+                await refreshAudioDevicesList(true);
+            }
             await recorder.start(true); // Start continuous Live VAD mode
+            // Refresh device list in background now that mic permissions are active
+            refreshAudioDevicesList(false).catch(() => {});
             startVisualizer();
             setSessionStatus(STATE_LIVE_LISTENING);
             startInactivityTimer();
@@ -1470,6 +1579,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         
+        if (data.assistant_text) {
+            activeAssistantText = data.assistant_text;
+        }
         appendAssistantMessage(data.assistant_text, data.audio_url, data.metrics);
 
         conversationHistory.push({ role: 'user', content: data.user_text });
@@ -1946,6 +2058,10 @@ document.addEventListener('DOMContentLoaded', () => {
             local_voice: selectLocalVoice ? selectLocalVoice.value : undefined
         };
 
+        if (selectBargeInSensitivity && recorder.setBargeInSensitivity) {
+            recorder.setBargeInSensitivity(selectBargeInSensitivity.value);
+        }
+
         // Filter out undefined keys so backend preserves existing server credentials
         const cleanPayload = {};
         for (const [k, v] of Object.entries(payload)) {
@@ -2169,7 +2285,8 @@ document.addEventListener('DOMContentLoaded', () => {
         devices.forEach(dev => {
             const opt = document.createElement('option');
             opt.value = dev.deviceId;
-            opt.textContent = dev.label;
+            const isInternal = recorder.isInternalMicrophone(dev.label);
+            opt.textContent = isInternal ? `${dev.label} [Built-in / Default]` : `${dev.label} [External Mic]`;
             if (dev.deviceId === savedId) {
                 opt.selected = true;
                 matchedOption = true;
@@ -2177,25 +2294,44 @@ document.addEventListener('DOMContentLoaded', () => {
             selectMicDevice.appendChild(opt);
         });
 
+        const hasExternal = devices.some(d => !recorder.isInternalMicrophone(d.label));
         if (matchedOption) {
             const activeLabel = selectMicDevice.selectedOptions[0]?.textContent || recorder.selectedDeviceLabel;
-            recorder.setSelectedDevice(savedId, activeLabel);
-            updateMicUIStatus(true, activeLabel);
+            const isInternal = recorder.isInternalMicrophone(activeLabel);
+            if (hasExternal && isInternal) {
+                // An external microphone is available; isolate the external mic
+                recorder.allowInternalMic = false;
+                const extDev = devices.find(d => !recorder.isInternalMicrophone(d.label));
+                selectMicDevice.value = extDev.deviceId;
+                recorder.setSelectedDevice(extDev.deviceId, extDev.label);
+                updateMicUIStatus(true, extDev.label);
+            } else {
+                recorder.allowInternalMic = !hasExternal || isInternal;
+                recorder.setSelectedDevice(savedId, activeLabel);
+                updateMicUIStatus(true, activeLabel);
+            }
         } else if (autoSelectDefault && devices.length > 0) {
             // Find preferred external/USB microphone if available
-            const externalDev = devices.find(d => {
-                const l = (d.label || '').toLowerCase();
-                return l.includes('usb') || l.includes('external') || l.includes('headset') || (l.includes('mic') && !l.includes('internal') && !l.includes('array'));
-            }) || devices[0];
-
-            selectMicDevice.value = externalDev.deviceId;
-            recorder.setSelectedDevice(externalDev.deviceId, externalDev.label);
-            updateMicUIStatus(true, externalDev.label);
+            const externalDev = devices.find(d => !recorder.isInternalMicrophone(d.label));
+            if (externalDev) {
+                recorder.allowInternalMic = false;
+                selectMicDevice.value = externalDev.deviceId;
+                recorder.setSelectedDevice(externalDev.deviceId, externalDev.label);
+                updateMicUIStatus(true, externalDev.label);
+            } else {
+                // Single microphone available (Laptop microphone with Adaptive Acoustic Cancellation)
+                recorder.allowInternalMic = true;
+                const defaultMic = devices[0];
+                selectMicDevice.value = defaultMic.deviceId;
+                recorder.setSelectedDevice(defaultMic.deviceId, defaultMic.label);
+                updateMicUIStatus(true, defaultMic.label);
+                console.log('[DEVICE] Active microphone connected with Adaptive Acoustic Isolation.');
+            }
         } else {
             // Saved device is no longer connected!
             if (savedId) {
                 updateMicUIStatus(false, recorder.selectedDeviceLabel || 'Disconnected');
-                showToast(`Your selected external microphone (${recorder.selectedDeviceLabel}) is disconnected.`, 'warning');
+                showToast(`Your selected microphone (${recorder.selectedDeviceLabel}) is disconnected.`, 'warning');
             } else {
                 updateMicUIStatus(false, 'None Selected');
             }
@@ -2207,26 +2343,28 @@ document.addEventListener('DOMContentLoaded', () => {
             const selectedOpt = selectMicDevice.selectedOptions[0];
             const deviceId = selectMicDevice.value;
             const deviceLabel = selectedOpt ? selectedOpt.textContent : '';
+            const isInternal = recorder.isInternalMicrophone(deviceLabel);
 
             if (deviceId) {
+                recorder.allowInternalMic = isInternal;
                 recorder.setSelectedDevice(deviceId, deviceLabel);
                 updateMicUIStatus(true, deviceLabel);
-                showToast(`External microphone selected: ${deviceLabel}`, 'info');
-
-                // If currently live, switch stream to the newly selected device immediately
-                if (sessionState.mode === MODE_LIVE_CALL && recorder.isRecording) {
-                    try {
-                        console.log(`[DEVICE] Switching active stream to device: "${deviceLabel}"`);
-                        await recorder.stop();
-                        await recorder.start(true);
-                        showToast(`Microphone switched and active!`, 'success');
-                    } catch (e) {
-                        showToast(`Failed to initialize ${deviceLabel}: ${e.message}`, 'error');
-                    }
-                }
+                showToast(`Microphone active: ${deviceLabel}`, 'info');
             } else {
                 recorder.setSelectedDevice('', '');
                 updateMicUIStatus(false, 'None');
+            }
+
+            // If currently live, switch stream to the newly selected device immediately
+            if (sessionState.mode === MODE_LIVE_CALL && recorder.isRecording) {
+                try {
+                    console.log(`[DEVICE] Switching active stream to device: "${deviceLabel}"`);
+                    await recorder.stop();
+                    await recorder.start(true);
+                    showToast(`Microphone switched and active!`, 'success');
+                } catch (e) {
+                    showToast(`Failed to initialize ${deviceLabel}: ${e.message}`, 'error');
+                }
             }
         });
     }
@@ -2274,7 +2412,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     recorder.onDevicesChanged = (devices) => {
-        refreshAudioDevicesList(false);
+        refreshAudioDevicesList(true);
     };
 
     // ----------------------------------------------------
