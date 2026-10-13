@@ -22,28 +22,35 @@ class AudioRecorder {
         this.onSilenceDetected = null;  // WAV fallback
         this.onBargeIn = null;          // Real-time speech interruption / barge-in callback
 
-        // High-Speed Adaptive VAD & Barge-In Parameters
+        // High-Speed Adaptive VAD & Barge-In Parameters (Calibrated to Initial Audio Input Level)
         this.baseThreshold = 0.015;
         this.noiseFloor = 0.008;
         this.silenceDurationMs = 1200; // Pause before triggering AI response
-        this.bargeInThreshold = 0.038;  // Close-mic human speech threshold over speaker output
-        this.minBargeInFrames = 2;      // Confirmation frames (~90ms) before triggering barge-in
-        this.minSpeechDurationMs = 200; // Minimum speech duration to qualify as genuine utterance
+        this.bargeInThreshold = 0.015;  // Same as initial audio input level (baseThreshold = 0.015)
+        this.minBargeInFrames = 5;      // Confirmation frames (~230ms) matching initial speech duration
+        this.minSpeechDurationMs = 250; // Minimum speech duration to qualify as genuine utterance
         this.antiEchoSettleTimeMs = 120;// Settling window for hardware AEC filter
         this.hasSpokenInTurn = false;
         this.lastSpeechTime = 0;
         this.speechStartTime = null;
         this.isMuted = false;
         this.isAiSpeaking = false;
+        this.isAiProcessing = false;
         this.bargeInEnabled = true;
         this.consecutiveBargeInFrames = 0;
         this.aiSpeakingStartTime = 0;
         this.finalTranscriptTimer = null;
+        this.minNormalVoiceRms = 0.035;
+        this.voiceBandMinHz = 200;
+        this.voiceBandMaxHz = 3400;
+        this.bargeInSensitivity = (typeof localStorage !== 'undefined' ? localStorage.getItem('voice_ai_bargein_sensitivity') : null) || 'normal';
+        this.applyBargeInSensitivity(this.bargeInSensitivity);
 
         // Device-Isolated External Microphone Management
-        this.selectedDeviceId = localStorage.getItem('voice_ai_selected_mic_id') || '';
-        this.selectedDeviceLabel = localStorage.getItem('voice_ai_selected_mic_label') || '';
+        this.selectedDeviceId = (typeof localStorage !== 'undefined' ? localStorage.getItem('voice_ai_selected_mic_id') : null) || '';
+        this.selectedDeviceLabel = (typeof localStorage !== 'undefined' ? localStorage.getItem('voice_ai_selected_mic_label') : null) || '';
         this.isDeviceDisconnected = false;
+        this.allowInternalMic = false;
         this.availableAudioDevices = [];
         this.onDeviceDisconnected = null;
         this.onDeviceConnected = null;
@@ -130,6 +137,34 @@ class AudioRecorder {
     }
 
     /**
+     * Check if an audio device label represents an internal/built-in microphone
+     */
+    isInternalMicrophone(label) {
+        if (!label || typeof label !== 'string') return true;
+        const l = label.toLowerCase().trim();
+        // Clear indicators of internal / built-in laptop microphones
+        const internalKeywords = [
+            'internal', 'built-in', 'builtin', 'array', 'integrated', 
+            'smart sound', 'intel', 'realtek', 'conexant', 'stereo mix',
+            'system', 'pc mic', 'laptop'
+        ];
+        // External indicators that override generic manufacturer names
+        const externalKeywords = [
+            'usb', 'headset', 'headphone', 'bluetooth', 'wireless', 
+            'external', 'fifine', 'blue yeti', 'yeti', 'rode', 'hyperx', 
+            'elgato', 'shure', 'samson', 'jbl', 'airpods', 'galaxy buds'
+        ];
+
+        const hasExternal = externalKeywords.some(kw => l.includes(kw));
+        if (hasExternal) return false;
+
+        const hasInternal = internalKeywords.some(kw => l.includes(kw));
+        if (hasInternal) return true;
+
+        return false;
+    }
+
+    /**
      * Check if the explicitly selected external microphone is active, live, and unmuted
      */
     isExternalMicActive() {
@@ -139,11 +174,18 @@ class AudioRecorder {
         if (!tracks || tracks.length === 0) return false;
         const track = tracks[0];
         if (track.readyState !== 'live' || track.muted) return false;
-        if (this.selectedDeviceId) {
-            const settings = track.getSettings ? track.getSettings() : {};
-            if (settings.deviceId && settings.deviceId !== this.selectedDeviceId) {
-                return false;
-            }
+
+        // Strict Requirement: Must have an explicitly selected external device
+        if (!this.selectedDeviceId) return false;
+
+        const label = track.label || this.selectedDeviceLabel || '';
+        if (!this.allowInternalMic && this.isInternalMicrophone(label)) {
+            return false;
+        }
+
+        const settings = track.getSettings ? track.getSettings() : {};
+        if (settings.deviceId && settings.deviceId !== this.selectedDeviceId) {
+            return false;
         }
         return true;
     }
@@ -290,6 +332,15 @@ class AudioRecorder {
                 }
                 currentText = currentText.trim();
 
+                // If barge-in prefix was recorded during interruption, ensure it is retained if WebSpeech splits results
+                if (this.bargeInPrefix && currentText) {
+                    const lowerCurrent = currentText.toLowerCase();
+                    const lowerPrefix = this.bargeInPrefix.toLowerCase();
+                    if (!lowerCurrent.includes(lowerPrefix)) {
+                        currentText = `${this.bargeInPrefix} ${currentText}`.trim();
+                    }
+                }
+
                 this.currentFinalTranscript = cleanFinal;
                 this.currentInterimTranscript = cleanInterim;
 
@@ -418,6 +469,8 @@ class AudioRecorder {
         this.currentFinalTranscript = "";
         this.currentInterimTranscript = "";
         this.audioData = [];
+        this.bargeInPrefix = '';
+        this.bargeInAudioBuffer = [];
 
         if (transcriptToSend && this.onSpeechTranscript) {
             this.onSpeechTranscript(transcriptToSend);
@@ -510,6 +563,17 @@ class AudioRecorder {
         }
 
         this.isDeviceDisconnected = false;
+        if (!this.selectedDeviceId && acquiredDeviceId) {
+            this.selectedDeviceId = acquiredDeviceId;
+            this.selectedDeviceLabel = trackLabel;
+            this.allowInternalMic = this.isInternalMicrophone(trackLabel);
+            if (typeof localStorage !== 'undefined') {
+                try {
+                    localStorage.setItem('voice_ai_selected_mic_id', acquiredDeviceId);
+                    localStorage.setItem('voice_ai_selected_mic_label', trackLabel);
+                } catch (e) {}
+            }
+        }
         console.log(`[DEVICE] External microphone connected: "${trackLabel}"`);
         console.log(`[DEVICE] Internal microphone excluded from interruption pipeline`);
         console.log(`[AUDIO] External microphone stream initialized`);
@@ -563,8 +627,8 @@ class AudioRecorder {
             if (this.isLiveCall && !this.isMuted) {
                 const now = Date.now();
 
-                // Dynamic Acoustic Isolation while AI is speaking
-                if (this.isAiSpeaking) {
+                // Dynamic Acoustic Isolation while AI is speaking or LLM is processing
+                if (this.isAiSpeaking || this.isAiProcessing) {
                     // Strict Rule: Interruption can ONLY be triggered if the selected external microphone is active and verified!
                     if (!this.isExternalMicActive()) {
                         // Internal microphone or disconnected device has zero authority
@@ -572,36 +636,52 @@ class AudioRecorder {
                         return;
                     }
 
-                    const elapsedSpeaking = now - (this.aiSpeakingStartTime || now);
-                    // Settling window allows browser hardware echo cancellation filter to calibrate
+                    const elapsedSpeaking = this.isAiSpeaking ? (now - (this.aiSpeakingStartTime || now)) : 999;
+                    // Settling window allows browser hardware echo cancellation filter to calibrate when speaker starts playing
                     if (this.bargeInEnabled && elapsedSpeaking > this.antiEchoSettleTimeMs) {
-                        // Elevated vocal threshold for close-mic human speech over speaker output
-                        const dynamicBargeInThreshold = Math.max(this.bargeInThreshold, this.noiseFloor * 3.0);
-                        if (rms > dynamicBargeInThreshold) {
+                        // Spectral Voice-Band Verification (Human speech formant frequencies: 200 Hz - 3400 Hz)
+                        const isVoiceFrequency = this.isVocalFrequencyPresent();
+
+                        // Calibrated normal conversational speech threshold:
+                        // Sounds below normal speech (< 0.035 RMS) or outside voice frequency band are neglected
+                        const dynamicBargeInThreshold = Math.max(
+                            this.bargeInThreshold || this.baseThreshold,
+                            this.noiseFloor * 2.2,
+                            this.minNormalVoiceRms || 0.035
+                        );
+                        if (rms > dynamicBargeInThreshold && isVoiceFrequency) {
                             this.consecutiveBargeInFrames++;
-                            console.log(`[VAD] Monitoring selected external microphone (rms=${rms.toFixed(4)}, threshold=${dynamicBargeInThreshold.toFixed(4)}, frames=${this.consecutiveBargeInFrames}/${this.minBargeInFrames})`);
+                            if (!this.bargeInAudioBuffer) this.bargeInAudioBuffer = [];
+                            this.bargeInAudioBuffer.push(channelCopy);
+                            console.log(`[VAD] Monitoring active microphone (rms=${rms.toFixed(4)}, threshold=${dynamicBargeInThreshold.toFixed(4)}, frames=${this.consecutiveBargeInFrames}/${this.minBargeInFrames}, voiceFreq=${isVoiceFrequency})`);
                             if (this.consecutiveBargeInFrames >= this.minBargeInFrames) {
-                                // Sustained human voice detected - trigger immediate barge-in!
-                                console.log(`[VAD] External microphone speech detected`);
+                                // Sustained normal human voice detected in voice frequency band - trigger verified barge-in!
+                                console.log(`[VAD] Normal voice speech detected in vocal frequency band (rms=${rms.toFixed(4)})`);
                                 console.log(`[VAD] Speech confirmation completed`);
-                                console.log(`[BARGE-IN] External microphone interruption confirmed (rms=${rms.toFixed(4)})`);
+                                console.log(`[BARGE-IN] Normal speech interruption confirmed (rms=${rms.toFixed(4)})`);
                                 this.isAiSpeaking = false;
+                                this.isAiProcessing = false;
                                 this.consecutiveBargeInFrames = 0;
                                 this.hasSpokenInTurn = true;
                                 this.speechStartTime = now;
                                 this.lastSpeechTime = now;
-                                this.audioData = [channelCopy];
+                                // CRITICAL: Preserve all onset speech audio frames from the beginning of speech
+                                this.audioData = (this.bargeInAudioBuffer && this.bargeInAudioBuffer.length > 0) ? [...this.bargeInAudioBuffer] : [channelCopy];
+                                this.bargeInAudioBuffer = [];
 
                                 if (this.onBargeIn) {
                                     this.onBargeIn('vad');
                                 }
-                                if (this.onSpeechStart) {
-                                    this.onSpeechStart();
-                                }
                             }
                         } else {
                             this.consecutiveBargeInFrames = 0;
+                            this.bargeInAudioBuffer = [];
+                            // Adaptively track ambient speaker floor during silence/low RMS in playback
+                            this.noiseFloor = this.noiseFloor * 0.96 + rms * 0.04;
                         }
+                    } else if (this.isAiSpeaking) {
+                        // During anti-echo settling window, adapt noise floor to speaker output
+                        this.noiseFloor = this.noiseFloor * 0.90 + rms * 0.10;
                     }
                     return;
                 }
@@ -655,6 +735,36 @@ class AudioRecorder {
         }
     }
 
+    /**
+     * Handle mid-utterance barge-in: AI is interrupted while user is speaking.
+     * CRITICAL: Preserves the user's ongoing speech, audio buffers, and transcript
+     * so the complete sentence is recorded rather than just the last word!
+     */
+    handleBargeInActive(source = 'barge_in', initialText = '') {
+        console.log(`[BARGE-IN] Active mid-utterance interruption transition (source=${source}): preserving ongoing speech buffer and transcript.`);
+        this.isAiSpeaking = false;
+        this.isAiProcessing = false;
+        this.consecutiveBargeInFrames = 0;
+        this.hasSpokenInTurn = true;
+        this.lastSpeechTime = Date.now();
+        if (!this.speechStartTime) {
+            this.speechStartTime = Date.now();
+        }
+
+        // Store barge-in prefix so initial words are never lost if WebSpeech splits results
+        if (initialText && initialText.trim()) {
+            this.bargeInPrefix = initialText.trim();
+            if (!this.currentLiveTranscript || !this.currentLiveTranscript.includes(this.bargeInPrefix)) {
+                this.currentLiveTranscript = this.currentLiveTranscript ? `${this.bargeInPrefix} ${this.currentLiveTranscript}`.trim() : this.bargeInPrefix;
+            }
+        }
+
+        if (this.finalTranscriptTimer) {
+            clearTimeout(this.finalTranscriptTimer);
+            this.finalTranscriptTimer = null;
+        }
+    }
+
     prepareForNextSpeech() {
         this.hasSpokenInTurn = false;
         this.lastSpeechTime = 0;
@@ -663,6 +773,8 @@ class AudioRecorder {
         this.currentFinalTranscript = "";
         this.currentInterimTranscript = "";
         this.audioData = [];
+        this.bargeInPrefix = '';
+        this.bargeInAudioBuffer = [];
         this.turnStartIndex = this.latestResultIndex || 0;
         this.consecutiveBargeInFrames = 0;
         this.isMuted = false;
@@ -681,6 +793,8 @@ class AudioRecorder {
         this.currentFinalTranscript = "";
         this.currentInterimTranscript = "";
         this.audioData = [];
+        this.bargeInPrefix = '';
+        this.bargeInAudioBuffer = [];
         this.turnStartIndex = 0;
         this.latestResultIndex = 0;
         this.noiseFloor = 0.008;
@@ -694,6 +808,68 @@ class AudioRecorder {
         if (this.recognition && this.isLiveCall && this.isRecording) {
             this.restartRecognitionSafe();
         }
+    }
+    
+    isVocalFrequencyPresent() {
+        if (!this.analyser || !this.analyser.frequencyBinCount) {
+            return true;
+        }
+        const freqBins = new Uint8Array(this.analyser.frequencyBinCount);
+        this.analyser.getByteFrequencyData(freqBins);
+        const sampleRate = (this.audioContext && this.audioContext.sampleRate) || 44100;
+        const binWidth = sampleRate / (this.analyser.fftSize || (this.analyser.frequencyBinCount * 2) || 256);
+        const minVoiceBin = Math.max(1, Math.floor((this.voiceBandMinHz || 200) / binWidth));
+        const maxVoiceBin = Math.min(freqBins.length - 1, Math.ceil((this.voiceBandMaxHz || 3400) / binWidth));
+
+        let sub200Energy = 0;
+        for (let i = 0; i < minVoiceBin; i++) {
+            sub200Energy += freqBins[i];
+        }
+
+        let voiceBandEnergy = 0;
+        let totalEnergy = 0;
+        for (let i = 0; i < freqBins.length; i++) {
+            totalEnergy += freqBins[i];
+            if (i >= minVoiceBin && i <= maxVoiceBin) {
+                voiceBandEnergy += freqBins[i];
+            }
+        }
+
+        if (totalEnergy === 0) {
+            return true; // Mock test / silent fallback
+        }
+
+        const voiceBandRatio = voiceBandEnergy / totalEnergy;
+
+        // Reject if low-frequency drone/rumble (<200Hz, e.g. AC/fan) heavily dominates
+        const isSubRumble = (sub200Energy > voiceBandEnergy * 1.5);
+        if (isSubRumble) {
+            return false;
+        }
+
+        // Conversational human speech formants in 200Hz-3400Hz range:
+        // Formant energy density must be present in voice band
+        return (voiceBandRatio >= 0.20 && voiceBandEnergy >= 30);
+    }
+
+    checkBargeIn(rms, isVoiceFrequency = true) {
+        const dynamicBargeInThreshold = Math.max(
+            this.bargeInThreshold || this.baseThreshold,
+            this.noiseFloor * 2.2,
+            this.minNormalVoiceRms || 0.035
+        );
+        if (rms > dynamicBargeInThreshold && isVoiceFrequency) {
+            this.consecutiveBargeInFrames++;
+            if (this.consecutiveBargeInFrames >= this.minBargeInFrames) {
+                this.consecutiveBargeInFrames = 0;
+                if (this.onBargeInDetected) this.onBargeInDetected();
+                if (this.onBargeIn) this.onBargeIn('vad');
+                return true;
+            }
+        } else {
+            this.consecutiveBargeInFrames = 0;
+        }
+        return false;
     }
 
     setMuted(muted) {
@@ -764,6 +940,46 @@ class AudioRecorder {
 
     setBargeInEnabled(enabled) {
         this.bargeInEnabled = !!enabled;
+    }
+
+    setAiProcessing(isProcessing) {
+        this.isAiProcessing = !!isProcessing;
+        this.consecutiveBargeInFrames = 0;
+    }
+
+    setBargeInSensitivity(level) {
+        this.bargeInSensitivity = level;
+        if (typeof localStorage !== 'undefined') {
+            try {
+                localStorage.setItem('voice_ai_bargein_sensitivity', level);
+            } catch (e) {}
+        }
+        this.applyBargeInSensitivity(level);
+    }
+
+    applyBargeInSensitivity(level) {
+        switch (level) {
+            case 'sensitive':
+                // Higher responsiveness, 3 frames confirmation (~140ms)
+                this.bargeInThreshold = this.baseThreshold * 0.85; // ~0.01275
+                this.minNormalVoiceRms = 0.025;
+                this.minBargeInFrames = 3;
+                break;
+            case 'firm':
+                // Strict confirmation, requires deliberate louder speech (~320ms)
+                this.bargeInThreshold = this.baseThreshold * 1.5; // ~0.0225
+                this.minNormalVoiceRms = 0.048;
+                this.minBargeInFrames = 7;
+                break;
+            case 'normal':
+            default:
+                // Normal conversational speech level: filters small/below-normal surrounding sounds
+                this.bargeInThreshold = this.baseThreshold; // 0.015 (exact match)
+                this.minNormalVoiceRms = 0.035;
+                this.minBargeInFrames = 5; // ~230ms (matches initial minSpeechDurationMs = 250ms)
+                break;
+        }
+        console.log(`[BARGE-IN] Sensitivity calibrated to "${level}": threshold=${this.bargeInThreshold}, minVoiceRms=${this.minNormalVoiceRms}, minFrames=${this.minBargeInFrames}`);
     }
 
     exportCurrentBuffer() {

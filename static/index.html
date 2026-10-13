@@ -267,6 +267,17 @@
                     <small class="field-hint">Allows speaking over AI to interrupt immediately with acoustic echo protection.</small>
                 </div>
 
+                <!-- Interruption Sensitivity Level -->
+                <div class="form-group" style="margin-top: 0.5rem;">
+                    <label for="selectBargeInSensitivity">Interruption Voice Detection</label>
+                    <select id="selectBargeInSensitivity">
+                        <option value="normal" selected>Normal (Neglects below-normal audio; normal speech interrupts - Recommended)</option>
+                        <option value="firm">Firm (Requires louder speech / loud environments)</option>
+                        <option value="sensitive">Sensitive (Lower threshold / softer voice)</option>
+                    </select>
+                    <small class="field-hint">Voice-band frequency (200Hz–3400Hz) filtered. Small surrounding voices, murmurs, and ambient sounds below normal conversational volume are neglected.</small>
+                </div>
+
                 <!-- Microphone Input Hardware Selection (Device-Isolated Barge-In) -->
                 <div style="margin-top: 0.85rem; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
