@@ -37,6 +37,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const messageCountEl = document.getElementById('messageCount');
     const btnClearChat = document.getElementById('btnClearChat');
 
+    // Collapsible Conversation Drop-Down Elements
+    const mainContainer = document.getElementById('mainContainer');
+    const transcriptPanel = document.getElementById('transcriptPanel');
+    const panelHeader = document.getElementById('panelHeader');
+    const btnToggleTranscript = document.getElementById('btnToggleTranscript');
+    const transcriptBody = document.getElementById('transcriptBody');
+
     // Metrics
     const metricSTT = document.getElementById('metricSTT');
     const metricLLM = document.getElementById('metricLLM');
@@ -598,8 +605,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 barHeight = (dataArray[i] / 255) * visualizerCanvas.height;
 
                 const gradient = canvasCtx.createLinearGradient(0, visualizerCanvas.height, 0, 0);
-                gradient.addColorStop(0, '#10b981');
-                gradient.addColorStop(1, '#6ee7b7');
+                gradient.addColorStop(0, '#0ea5e9');
+                gradient.addColorStop(1, '#7dd3fc');
 
                 canvasCtx.fillStyle = gradient;
                 canvasCtx.fillRect(x, visualizerCanvas.height - barHeight, barWidth, barHeight);
@@ -1387,6 +1394,81 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnClearChat) {
         btnClearChat.addEventListener('click', clearChat);
     }
+
+    // ----------------------------------------------------
+    // Collapsible Conversation Drop-Down Interactions
+    // ----------------------------------------------------
+    function isTranscriptCollapsed() {
+        return transcriptPanel && transcriptPanel.classList.contains('collapsed');
+    }
+
+    function expandTranscript(scrollSmoothly = true) {
+        if (!transcriptPanel || !isTranscriptCollapsed()) return;
+
+        transcriptPanel.classList.remove('collapsed');
+        if (mainContainer) mainContainer.classList.remove('conversation-collapsed');
+
+        if (btnToggleTranscript) {
+            btnToggleTranscript.setAttribute('aria-expanded', 'true');
+            btnToggleTranscript.title = 'Collapse';
+        }
+
+        if (scrollSmoothly && chatHistory) {
+            // Smoothly reveal and scroll the conversation messages into view
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    chatHistory.scrollTo({
+                        top: chatHistory.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }, 60);
+            });
+        }
+    }
+
+    function collapseTranscript() {
+        if (!transcriptPanel || isTranscriptCollapsed()) return;
+
+        transcriptPanel.classList.add('collapsed');
+        if (mainContainer) mainContainer.classList.add('conversation-collapsed');
+
+        if (btnToggleTranscript) {
+            btnToggleTranscript.setAttribute('aria-expanded', 'false');
+            btnToggleTranscript.title = 'Expand';
+        }
+    }
+
+    function toggleTranscript() {
+        if (isTranscriptCollapsed()) {
+            expandTranscript(true);
+        } else {
+            collapseTranscript();
+        }
+    }
+
+    if (btnToggleTranscript) {
+        btnToggleTranscript.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleTranscript();
+        });
+
+        btnToggleTranscript.addEventListener('keydown', (e) => {
+            if ((e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') && isTranscriptCollapsed()) {
+                e.preventDefault();
+                expandTranscript(true);
+            }
+        });
+    }
+
+    if (panelHeader) {
+        panelHeader.addEventListener('click', (e) => {
+            if (!e.target.closest('button') && !e.target.closest('a')) {
+                toggleTranscript();
+            }
+        });
+    }
+
+
 
     // Initialize UI and WebSocket on load
     updateUI();

@@ -43,7 +43,7 @@
         </div>
     </header>
 
-    <main>
+    <main class="conversation-collapsed" id="mainContainer">
         <!-- Voice Interaction Stage (Left Column) -->
         <section class="stage-panel">
             <div class="orb-container">
@@ -81,31 +81,43 @@
         </section>
 
         <!-- Conversation Transcript Panel (Right Column) -->
-        <section class="transcript-panel">
-            <div class="panel-header">
-                <div class="panel-title">
-                    <svg width="17" height="17" fill="var(--accent-emerald-dark)" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>
-                    Conversation
+        <section class="transcript-panel collapsed" id="transcriptPanel">
+            <div class="panel-header" id="panelHeader">
+                <div class="panel-title-area">
+                    <div class="panel-title">
+                        <svg width="17" height="17" fill="var(--accent-sky-dark)" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>
+                        <span>Conversation</span>
+                    </div>
+                    <span id="messageCount" class="badge-turns">0 turns</span>
                 </div>
-                <span id="messageCount" style="font-size: 0.8rem; color: var(--text-muted);">0 turns</span>
-            </div>
 
-            <div class="chat-history-container" id="chatHistory">
-                <div class="empty-state" id="emptyState">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                    <p style="font-weight: 500;">No messages yet.</p>
-                    <p style="font-size: 0.82rem;">Start a voice call or type below to talk with AI.</p>
-                </div>
-            </div>
-
-            <!-- Fallback text input bar -->
-            <form class="chat-input-bar" id="chatForm">
-                <input type="text" id="textInput" placeholder="Type a message...">
-                <button type="submit">
-                    <span>Send</span>
-                    <svg width="13" height="13" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                <!-- Drop-down Button -->
+                <button class="btn-dropdown-toggle" id="btnToggleTranscript" type="button" aria-expanded="false" aria-controls="transcriptBody" title="Expand">
+                    <svg class="dropdown-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
                 </button>
-            </form>
+            </div>
+
+            <!-- Collapsible Body containing Chat History and Input Bar -->
+            <div class="transcript-body" id="transcriptBody">
+                <div class="chat-history-container" id="chatHistory">
+                    <div class="empty-state" id="emptyState">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                        <p style="font-weight: 500;">No messages yet.</p>
+                        <p style="font-size: 0.82rem;">Start a voice call or type below to talk with AI.</p>
+                    </div>
+                </div>
+
+                <!-- Fallback text input bar -->
+                <form class="chat-input-bar" id="chatForm">
+                    <input type="text" id="textInput" placeholder="Type a message...">
+                    <button type="submit">
+                        <span>Send</span>
+                        <svg width="13" height="13" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                    </button>
+                </form>
+            </div>
         </section>
     </main>
 
